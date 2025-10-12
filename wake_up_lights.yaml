@@ -1,0 +1,83 @@
+- id: wake_up_lights_sunrise_all_systems
+  alias: "Wake Up Lights - Gentle Sunrise (All 3 Systems)"
+  description: "Gradually brighten all lights from sunrise: Tube Lamp, Govee Bars, and Office Lights"
+
+  trigger:
+    - platform: sun
+      event: sunrise
+      offset: "00:00:00"  # Start at sunrise
+
+  condition: []
+
+  action:
+    # Step 1: Turn on lights at 5% brightness, warm color
+    - service: light.turn_on
+      target:
+        entity_id:
+          - light.tube_lamp
+          - light.rgbic_tv_light_bars
+      data:
+        brightness: 13        # 5% of 255
+        color_temp_kelvin: 2500  # Warm orange-ish
+        transition: 2         # Fade on over 2 seconds
+
+    # Step 1b: Turn on Office Lights to warm orange
+    - service: remote.send_command
+      target:
+        entity_id: remote.office_lights
+      data:
+        device: "Office Lights"
+        command: ["Orange"]
+
+    # Step 1c: Dim the Office Lights down
+    - repeat:
+        count: 5
+        sequence:
+          - service: remote.send_command
+            target:
+              entity_id: remote.office_lights
+            data:
+              device: "Office Lights"
+              command: ["Light-"]
+          - delay:
+              milliseconds: 200
+
+    # Step 2: Wait 1 hour
+    - delay:
+        hours: 1
+        minutes: 0
+        seconds: 0
+
+    # Step 3: Gradually increase to 80% over the next hour
+    - service: light.turn_on
+      target:
+        entity_id:
+          - light.tube_lamp
+          - light.rgbic_tv_light_bars
+      data:
+        brightness: 204       # 80% of 255
+        color_temp_kelvin: 4000  # Warmer daylight
+        transition: 3600      # Transition over 3600 seconds (1 hour)
+
+    # Step 3b: Gradually brighten Office Lights
+    - service: remote.send_command
+      target:
+        entity_id: remote.office_lights
+      data:
+        device: "Office Lights"
+        command: ["White"]
+
+    # Step 3c: Brighten Office Lights over time
+    - repeat:
+        count: 10
+        sequence:
+          - delay:
+              seconds: 360  # Every 6 minutes
+          - service: remote.send_command
+            target:
+              entity_id: remote.office_lights
+            data:
+              device: "Office Lights"
+              command: ["Light+"]
+
+  mode: single  # Don't run multiple instances
