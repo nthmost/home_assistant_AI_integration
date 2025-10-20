@@ -1,5 +1,10 @@
 # Home Assistant Device Summary
 
+## Hardware
+
+### Zigbee Coordinator
+- **Sonoff Zigbee 3.0 USB Dongle** - Connected directly to Home Assistant host
+
 ## Working Devices
 
 ### Lights (1/4 working)
