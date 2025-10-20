@@ -33,6 +33,18 @@
 - Use descriptive names like `demo_*.py`, `try_*.py`, `run_*.py`, or `example_*.py` for experimental scripts
 - Keep `test_*.py` exclusively for proper unit tests in the `tests/` directory
 
+### Code Organization
+- **All imports at top of file, never in functions**
+- Keep imports organized: stdlib, third-party, local modules
+- Avoid lazy imports unless there's a strong performance reason
+
+### Display Mode vs Headless Mode
+- **ASCII displays: completely suppress logging when display is active**
+- When running with interactive displays (curses, rich panels, etc.), logs interfere with the display
+- **Simple rule: display mode = no logs, headless mode = normal logs**
+- This ensures clean visual output without log noise
+- Use `--display` flag pattern for scripts that offer visual modes
+
 ## Collaboration Style
 
 ### Decision Making
