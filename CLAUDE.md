@@ -45,6 +45,13 @@
 - This ensures clean visual output without log noise
 - Use `--display` flag pattern for scripts that offer visual modes
 
+### Streamlit Development
+- **`st.rerun()` calls are almost never necessary** - Streamlit's run model handles reruns automatically
+- Every widget interaction triggers a natural rerun of the entire script
+- Fetch fresh state at the top of the script - it runs on every interaction
+- Let Streamlit's reactive model work for you - don't fight it with manual reruns
+- Pattern: Fetch state → Render UI → Handle interactions → (Streamlit reruns automatically)
+
 ## Collaboration Style
 
 ### Decision Making
