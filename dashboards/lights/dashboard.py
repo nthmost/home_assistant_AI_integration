@@ -12,6 +12,7 @@ A Streamlit-based dashboard for controlling lights with:
 
 import streamlit as st
 import time
+import logging
 from datetime import datetime, timedelta
 from collections import defaultdict
 from typing import Dict, List, Optional, Tuple
@@ -19,6 +20,14 @@ from homeassistant_api import Client
 from homeassistant_api.models.entity import Entity
 
 from ha_core import HomeAssistantInspector, load_credentials
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(levelname)s [%(name)s] %(message)s',
+    handlers=[logging.StreamHandler()]
+)
+logger = logging.getLogger(__name__)
 
 # Configuration
 INACTIVE_THRESHOLD_DAYS = 14  # Filter lights inactive for 2+ weeks
@@ -35,6 +44,7 @@ st.set_page_config(
 def get_inspector():
     """Initialize HA Inspector - fresh on every rerun for current state"""
     url, token = load_credentials()
+    logger.info("🔄 Initializing fresh HomeAssistantInspector")
     return HomeAssistantInspector(url, token, log_level=40)  # ERROR level to reduce log spam
 
 
@@ -196,7 +206,10 @@ def get_friendly_name(entity: Entity) -> str:
 def is_light_on(entity: Entity) -> bool:
     """Check if light is currently on"""
     if hasattr(entity, 'state') and hasattr(entity.state, 'state'):
-        return entity.state.state.lower() == 'on'
+        state_value = entity.state.state.lower() == 'on'
+        logger.debug(f"💡 {entity.entity_id}: state={entity.state.state} → is_on={state_value}")
+        return state_value
+    logger.warning(f"⚠️  {entity.entity_id}: No state attribute found")
     return False
 
 
@@ -230,32 +243,54 @@ def render_light_grid(lights: List[Entity], inspector: HomeAssistantInspector):
             with st.container():
                 st.markdown(f"**{name}**")
 
-                # On/Off toggle with colored status
+                # Status indicator (informational only)
                 if is_on:
                     st.markdown("🟢 <span style='color: #00FF00;'>**ON**</span>", unsafe_allow_html=True)
                 else:
                     st.markdown("⚫ <span style='color: #888888;'>**OFF**</span>", unsafe_allow_html=True)
 
-                st.caption(f"DEBUG: is_on={is_on}, state={light.state.state}")  # Debug
+                # Separate ON/OFF buttons
+                col_on, col_off = st.columns(2)
 
-                new_state = st.toggle(
-                    "Power",
-                    value=is_on,
-                    key=f"toggle_{light.entity_id}_{idx}",
-                    label_visibility="collapsed"
-                )
+                with col_on:
+                    if st.button("ON", key=f"on_{light.entity_id}_{idx}", use_container_width=True):
+                        from homeassistant_api.errors import HomeassistantAPIError
 
-                if new_state != is_on:
-                    service = "turn_on" if new_state else "turn_off"
-                    st.write(f"DEBUG: Calling {service} on {light.entity_id}")
-                    inspector.client.trigger_service(
-                        domain="light",
-                        service=service,
-                        entity_id=light.entity_id
-                    )
-                    # Give HA time to process the state change before Streamlit reruns
-                    time.sleep(0.5)
-                    # Streamlit will automatically rerun after this interaction
+                        # Determine domain from entity_id
+                        domain = light.entity_id.split('.')[0]
+                        logger.info(f"💡 ON button pressed: {light.entity_id} (domain: {domain})")
+                        try:
+                            inspector.client.trigger_service(
+                                domain=domain,
+                                service="turn_on",
+                                entity_id=light.entity_id
+                            )
+                            logger.info(f"✅ turn_on successful for {light.entity_id}")
+                            time.sleep(0.3)
+                            st.rerun()
+                        except HomeassistantAPIError as e:
+                            logger.error(f"❌ turn_on FAILED: {e}")
+                            st.error(f"Failed: {e}")
+
+                with col_off:
+                    if st.button("OFF", key=f"off_{light.entity_id}_{idx}", use_container_width=True):
+                        from homeassistant_api.errors import HomeassistantAPIError
+
+                        # Determine domain from entity_id
+                        domain = light.entity_id.split('.')[0]
+                        logger.info(f"💡 OFF button pressed: {light.entity_id} (domain: {domain})")
+                        try:
+                            inspector.client.trigger_service(
+                                domain=domain,
+                                service="turn_off",
+                                entity_id=light.entity_id
+                            )
+                            logger.info(f"✅ turn_off successful for {light.entity_id}")
+                            time.sleep(0.3)
+                            st.rerun()
+                        except HomeassistantAPIError as e:
+                            logger.error(f"❌ turn_off FAILED: {e}")
+                            st.error(f"Failed: {e}")
 
                 # Brightness slider if supported
                 if capabilities['brightness'] and is_on:
@@ -268,13 +303,20 @@ def render_light_grid(lights: List[Entity], inspector: HomeAssistantInspector):
                     )
 
                     if abs(new_brightness - brightness) > 5:  # Debounce small changes
-                        st.write(f"DEBUG: Setting brightness to {new_brightness}")
-                        inspector.client.trigger_service(
-                            domain="light",
-                            service="turn_on",
-                            entity_id=light.entity_id,
-                            brightness=new_brightness
-                        )
+                        from homeassistant_api.errors import HomeassistantAPIError
+
+                        logger.info(f"💡 BRIGHTNESS CHANGED: {light.entity_id}: {brightness} → {new_brightness}")
+                        try:
+                            inspector.client.trigger_service(
+                                domain="light",
+                                service="turn_on",
+                                entity_id=light.entity_id,
+                                brightness=new_brightness
+                            )
+                            logger.info(f"✅ Brightness set successfully")
+                        except HomeassistantAPIError as e:
+                            logger.error(f"❌ Brightness change FAILED: {e}")
+                            st.error(f"Brightness control failed: {e}")
                         time.sleep(0.5)  # Give HA time to process
 
                 st.divider()
@@ -294,23 +336,48 @@ def render_light_list(lights: List[Entity], inspector: HomeAssistantInspector):
             st.write(f"💡 **{name}**")
 
         with col2:
-            # On/Off toggle
-            new_state = st.toggle(
-                "On/Off",
-                value=is_on,
-                key=f"list_toggle_{light.entity_id}",
-                label_visibility="collapsed"
-            )
+            # Separate ON/OFF buttons
+            btn_col1, btn_col2 = st.columns(2)
 
-            if new_state != is_on:
-                service = "turn_on" if new_state else "turn_off"
-                inspector.client.trigger_service(
-                    domain="light",
-                    service=service,
-                    entity_id=light.entity_id
-                )
-                time.sleep(0.5)  # Give HA time to process
-                # Streamlit will automatically rerun after this interaction
+            with btn_col1:
+                if st.button("ON", key=f"list_on_{light.entity_id}", use_container_width=True):
+                    from homeassistant_api.errors import HomeassistantAPIError
+
+                    # Determine domain from entity_id
+                    domain = light.entity_id.split('.')[0]
+                    logger.info(f"💡 ON button pressed: {light.entity_id} (domain: {domain})")
+                    try:
+                        inspector.client.trigger_service(
+                            domain=domain,
+                            service="turn_on",
+                            entity_id=light.entity_id
+                        )
+                        logger.info(f"✅ turn_on successful for {light.entity_id}")
+                        time.sleep(0.3)
+                        st.rerun()
+                    except HomeassistantAPIError as e:
+                        logger.error(f"❌ turn_on FAILED: {e}")
+                        st.error(f"Failed: {e}")
+
+            with btn_col2:
+                if st.button("OFF", key=f"list_off_{light.entity_id}", use_container_width=True):
+                    from homeassistant_api.errors import HomeassistantAPIError
+
+                    # Determine domain from entity_id
+                    domain = light.entity_id.split('.')[0]
+                    logger.info(f"💡 OFF button pressed: {light.entity_id} (domain: {domain})")
+                    try:
+                        inspector.client.trigger_service(
+                            domain=domain,
+                            service="turn_off",
+                            entity_id=light.entity_id
+                        )
+                        logger.info(f"✅ turn_off successful for {light.entity_id}")
+                        time.sleep(0.3)
+                        st.rerun()
+                    except HomeassistantAPIError as e:
+                        logger.error(f"❌ turn_off FAILED: {e}")
+                        st.error(f"Failed: {e}")
 
         with col3:
             # Brightness slider if supported
@@ -383,6 +450,7 @@ def main():
 
         # Manual refresh button
         if st.button("🔄 Refresh Now"):
+            logger.info("🔄 Manual refresh requested by user")
             st.rerun()  # Explicit user action - one of the rare valid uses
 
         st.divider()
@@ -394,33 +462,52 @@ def main():
     st.title("💡 Light Dashboard")
 
     # Get inspector (fresh on every Streamlit rerun = fresh state)
+    from homeassistant_api.errors import HomeassistantAPIError
+    from requests.exceptions import ConnectionError, Timeout
+
     try:
         inspector = get_inspector()
-    except Exception as e:
+    except (HomeassistantAPIError, ConnectionError, Timeout) as e:
         st.error(f"Failed to connect to Home Assistant: {e}")
+        logger.error(f"❌ Connection failed: {e}")
         return
 
-    # Get all lights (fresh from HA via fresh inspector)
+    # Get all lights AND remotes (fresh from HA via fresh inspector)
     all_lights = inspector.lights
+    all_remotes = inspector.get_entities_by_domain('remote')
 
-    if not all_lights:
-        st.warning("No lights found in Home Assistant")
+    # Combine lights and remotes (remotes that act like lights, e.g., Broadlink IR)
+    all_controllable = all_lights + all_remotes
+
+    logger.info(f"📊 Retrieved {len(all_lights)} lights + {len(all_remotes)} remotes = {len(all_controllable)} total controllable entities")
+
+    if not all_controllable:
+        st.warning("No controllable entities found in Home Assistant")
+        logger.warning("⚠️  No lights or remotes found!")
         return
 
-    # Filter active lights
-    active_lights = [light for light in all_lights if is_light_active(light)]
+    # Filter active entities
+    active_entities = [entity for entity in all_controllable if is_light_active(entity)]
+    logger.info(f"📊 {len(active_entities)} entities active (within {INACTIVE_THRESHOLD_DAYS} days)")
+
+    # Log current state of all active entities
+    on_entities = [entity for entity in active_entities if is_light_on(entity)]
+    logger.info(f"💡 Currently ON: {len(on_entities)} entities")
+    for entity in on_entities:
+        logger.info(f"   ✓ {entity.entity_id}: {entity.state.state}")
 
     # Group by room
-    grouped_lights = group_lights_by_room(active_lights)
+    grouped_lights = group_lights_by_room(active_entities)
 
     # Display stats
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.metric("Total Lights", len(all_lights))
+        st.metric("Total Entities", len(all_controllable))
+        st.caption(f"{len(all_lights)} lights, {len(all_remotes)} remotes")
     with col2:
-        st.metric("Active Lights", len(active_lights))
+        st.metric("Active Entities", len(active_entities))
     with col3:
-        on_count = sum(1 for light in active_lights if is_light_on(light))
+        on_count = sum(1 for entity in active_entities if is_light_on(entity))
         st.metric("Currently On", on_count)
 
     st.divider()

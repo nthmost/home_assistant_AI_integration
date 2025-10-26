@@ -1,0 +1,9 @@
+# Helper entities for keypad PIN code functionality
+# Add this to your Home Assistant configuration.yaml with:
+#   input_text: !include automations/keypad_helpers.yaml
+
+keypad_pin_sequence:
+  name: Keypad PIN Sequence
+  initial: ""
+  max: 10
+  mode: text

@@ -64,23 +64,36 @@ Restart Home Assistant to load the new configuration.
 }
 ```
 
-## Key Mappings
+## Current Configuration
 
-The default automations map numpad keys as follows:
+The keypad is currently configured for PIN code entry:
 
-| Key | Action | Key Code |
-|-----|--------|----------|
-| 0 | All Lights Off | 82 |
-| 1 | Toggle Office Lights | 79 |
-| 2 | Toggle Tube Lamp | 80 |
-| 3 | Toggle Govee TV Bars | 81 |
-| 4-9 | Available for custom actions | 75, 76, 77, 71, 72, 73 |
-| + | Brightness Up | 78 |
-| - | Brightness Down | 74 |
-| Enter | Trigger Sunrise Lights | 96 |
-| . | Available | 83 |
-| / | Available | 98 |
-| * | Available | 55 |
+**PIN Code: `123` + `Enter` = Turn ON Tube Lamp**
+
+See `keypad_pin_code.yaml` and `docs/setup/keypad_pin_setup.md` for details on the PIN code system.
+
+## Available Key Codes
+
+All numpad keys are available for custom automations:
+
+| Key | Key Code |
+|-----|----------|
+| 0 | 82 |
+| 1 | 79 |
+| 2 | 80 |
+| 3 | 81 |
+| 4 | 75 |
+| 5 | 76 |
+| 6 | 77 |
+| 7 | 71 |
+| 8 | 72 |
+| 9 | 73 |
+| + | 78 |
+| - | 74 |
+| Enter | 96 |
+| . | 83 |
+| / | 98 |
+| * | 55 |
 
 ## Finding Key Codes
 

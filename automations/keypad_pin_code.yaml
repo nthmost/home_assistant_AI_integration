@@ -1,0 +1,155 @@
+# Keypad PIN Code Automations
+# PIN: 123 + Enter = Turn ON Tube Lamp
+#
+# This automation sequence:
+# 1. Captures each digit press (1, 2, 3) and appends to sequence
+# 2. Validates sequence when Enter is pressed
+# 3. Resets sequence after 10 seconds of inactivity
+# 4. Resets sequence on wrong digit or after successful action
+
+# Digit 1: Append "1" to sequence
+- id: keypad_pin_digit_1
+  alias: "Keypad PIN: Digit 1"
+  description: "Capture keypad digit 1 for PIN sequence"
+
+  trigger:
+    - platform: event
+      event_type: keyboard_remote_command_received
+      event_data:
+        device_descriptor: /dev/input/by-id/usb-Compx_2.4G_Wireless_Receiver-event-kbd
+        key_code: 79  # KEY_KP1
+        type: key_down
+
+  action:
+    - service: input_text.set_value
+      target:
+        entity_id: input_text.keypad_pin_sequence
+      data:
+        value: "{{ states('input_text.keypad_pin_sequence') ~ '1' }}"
+
+# Digit 2: Append "2" to sequence
+- id: keypad_pin_digit_2
+  alias: "Keypad PIN: Digit 2"
+  description: "Capture keypad digit 2 for PIN sequence"
+
+  trigger:
+    - platform: event
+      event_type: keyboard_remote_command_received
+      event_data:
+        device_descriptor: /dev/input/by-id/usb-Compx_2.4G_Wireless_Receiver-event-kbd
+        key_code: 80  # KEY_KP2
+        type: key_down
+
+  action:
+    - service: input_text.set_value
+      target:
+        entity_id: input_text.keypad_pin_sequence
+      data:
+        value: "{{ states('input_text.keypad_pin_sequence') ~ '2' }}"
+
+# Digit 3: Append "3" to sequence
+- id: keypad_pin_digit_3
+  alias: "Keypad PIN: Digit 3"
+  description: "Capture keypad digit 3 for PIN sequence"
+
+  trigger:
+    - platform: event
+      event_type: keyboard_remote_command_received
+      event_data:
+        device_descriptor: /dev/input/by-id/usb-Compx_2.4G_Wireless_Receiver-event-kbd
+        key_code: 81  # KEY_KP3
+        type: key_down
+
+  action:
+    - service: input_text.set_value
+      target:
+        entity_id: input_text.keypad_pin_sequence
+      data:
+        value: "{{ states('input_text.keypad_pin_sequence') ~ '3' }}"
+
+# Other digits: Reset sequence (wrong PIN)
+- id: keypad_pin_wrong_digit
+  alias: "Keypad PIN: Wrong Digit"
+  description: "Reset PIN sequence on wrong digit (0, 4-9)"
+
+  trigger:
+    - platform: event
+      event_type: keyboard_remote_command_received
+      event_data:
+        device_descriptor: /dev/input/by-id/usb-Compx_2.4G_Wireless_Receiver-event-kbd
+        type: key_down
+
+  condition:
+    # Only trigger on digit keys that aren't 1, 2, or 3
+    - condition: template
+      value_template: >
+        {{ trigger.event.data.key_code in [82, 75, 76, 77, 71, 72, 73] }}
+
+  action:
+    - service: input_text.set_value
+      target:
+        entity_id: input_text.keypad_pin_sequence
+      data:
+        value: ""
+
+# Enter Key: Validate PIN and trigger action
+- id: keypad_pin_enter_validate
+  alias: "Keypad PIN: Enter = Validate & Turn ON Tube Lamp"
+  description: "Check if PIN is 123, turn on Tube Lamp if correct, reset sequence"
+
+  trigger:
+    - platform: event
+      event_type: keyboard_remote_command_received
+      event_data:
+        device_descriptor: /dev/input/by-id/usb-Compx_2.4G_Wireless_Receiver-event-kbd
+        key_code: 96  # KEY_KPENTER
+        type: key_down
+
+  action:
+    - choose:
+        # Correct PIN: 123
+        - conditions:
+            - condition: template
+              value_template: "{{ states('input_text.keypad_pin_sequence') == '123' }}"
+          sequence:
+            # Turn ON Tube Lamp
+            - service: light.turn_on
+              target:
+                entity_id: light.tube_lamp
+            # Reset sequence
+            - service: input_text.set_value
+              target:
+                entity_id: input_text.keypad_pin_sequence
+              data:
+                value: ""
+      # Wrong PIN or empty: just reset
+      default:
+        - service: input_text.set_value
+          target:
+            entity_id: input_text.keypad_pin_sequence
+          data:
+            value: ""
+
+# Timeout: Reset sequence after 10 seconds of inactivity
+- id: keypad_pin_timeout
+  alias: "Keypad PIN: Timeout Reset"
+  description: "Clear PIN sequence after 10 seconds of inactivity"
+
+  trigger:
+    - platform: state
+      entity_id: input_text.keypad_pin_sequence
+      to: ~
+      for:
+        seconds: 10
+
+  condition:
+    # Only reset if sequence is not empty
+    - condition: template
+      value_template: "{{ states('input_text.keypad_pin_sequence') != '' }}"
+
+  action:
+    - service: input_text.set_value
+      target:
+        entity_id: input_text.keypad_pin_sequence
+      data:
+        value: ""
