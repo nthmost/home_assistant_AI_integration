@@ -12,10 +12,19 @@ from collections import defaultdict
 try:
     from homeassistant_api import Client
     from homeassistant_api.models import Entity, State, Domain, Service
+    from homeassistant_api.errors import HomeassistantAPIError
 except ImportError as e:
     raise ImportError(
         "HomeAssistant-API library not found. Install with: pip install HomeAssistant-API"
     ) from e
+
+from .exceptions import (
+    ConnectionError as HAConnectionError,
+    AuthenticationError,
+    EntityNotFoundError,
+    APIError,
+    StateError,
+)
 
 
 # Configure colorful logging
@@ -117,12 +126,12 @@ class HomeAssistantInspector:
         try:
             self.client = Client(api_url, token, verify_ssl=verify_ssl)
             self._verify_connection()
-        except ConnectionError as e:
+        except HAConnectionError as e:
             self.logger.error(f"Failed to connect to Home Assistant: {e}")
             raise
-        except Exception as e:
-            self.logger.error(f"Unexpected error during initialization: {e}")
-            raise
+        except (HomeassistantAPIError, AuthenticationError) as e:
+            self.logger.error(f"API error during initialization: {e}")
+            raise APIError(f"Failed to initialize Home Assistant client: {e}") from e
 
         # Cache for expensive operations
         self._entities_cache: Optional[Dict[str, Any]] = None
@@ -135,11 +144,11 @@ class HomeAssistantInspector:
         """Verify we can connect to Home Assistant"""
         try:
             if not self.client.check_api_running():
-                raise ConnectionError("Home Assistant API is not responding")
+                raise HAConnectionError("Home Assistant API is not responding")
             self.logger.debug("Connection verified - API is running")
-        except Exception as e:
+        except (HomeassistantAPIError, ConnectionError) as e:
             self.logger.error(f"Connection verification failed: {e}")
-            raise ConnectionError(f"Cannot connect to Home Assistant: {e}") from e
+            raise HAConnectionError(f"Cannot connect to Home Assistant: {e}") from e
 
     def refresh_cache(self) -> None:
         """Clear all caches to force fresh data on next access"""
@@ -157,7 +166,7 @@ class HomeAssistantInspector:
         """Check if Home Assistant is currently running"""
         try:
             return self.client.check_api_running()
-        except Exception as e:
+        except (HomeassistantAPIError, HAConnectionError, ConnectionError) as e:
             self.logger.warning(f"Failed to check running status: {e}")
             return False
 
@@ -168,9 +177,9 @@ class HomeAssistantInspector:
             self.logger.debug("Fetching HA configuration")
             try:
                 self._config_cache = self.client.get_config()
-            except Exception as e:
+            except HomeassistantAPIError as e:
                 self.logger.error(f"Failed to get config: {e}")
-                raise
+                raise APIError(f"Cannot retrieve Home Assistant configuration: {e}") from e
         return self._config_cache
 
     @property
@@ -189,7 +198,7 @@ class HomeAssistantInspector:
         try:
             self.logger.debug("Fetching components")
             return self.client.get_components()
-        except Exception as e:
+        except HomeassistantAPIError as e:
             self.logger.error(f"Failed to get components: {e}")
             return tuple()
 
@@ -206,9 +215,9 @@ class HomeAssistantInspector:
                 self._entities_cache = self.client.get_entities()
                 entity_count = sum(len(group.entities) for group in self._entities_cache.values())
                 self.logger.info(f"Retrieved {entity_count} entities across {len(self._entities_cache)} groups")
-            except Exception as e:
+            except HomeassistantAPIError as e:
                 self.logger.error(f"Failed to fetch entities: {e}")
-                raise
+                raise APIError(f"Cannot retrieve entities from Home Assistant: {e}") from e
         return self._entities_cache
 
     def get_entity(self, entity_id: str) -> Optional[Entity]:
@@ -224,9 +233,9 @@ class HomeAssistantInspector:
         self.logger.debug(f"Fetching entity: {entity_id}")
         try:
             return self.client.get_entity(entity_id=entity_id)
-        except Exception as e:
-            self.logger.warning(f"Failed to get entity {entity_id}: {e}")
-            return None
+        except HomeassistantAPIError as e:
+            self.logger.warning(f"Entity not found: {entity_id}: {e}")
+            raise EntityNotFoundError(f"Entity '{entity_id}' not found") from e
 
     def get_entities_by_domain(self, domain: str) -> List[Entity]:
         """
@@ -249,8 +258,9 @@ class HomeAssistantInspector:
                 self.logger.info(f"Found {len(entities)} entities in domain '{domain}'")
             else:
                 self.logger.warning(f"Domain '{domain}' not found")
-        except Exception as e:
+        except (HomeassistantAPIError, APIError) as e:
             self.logger.error(f"Error fetching entities for domain {domain}: {e}")
+            raise APIError(f"Cannot retrieve entities for domain '{domain}': {e}") from e
 
         return entities
 
@@ -286,10 +296,11 @@ class HomeAssistantInspector:
 
                     if state not in inactive_states:
                         active[domain].append(entity)
-        except Exception as e:
+        except (HomeassistantAPIError, APIError, StateError) as e:
             self.logger.error(f"Error filtering active entities: {e}")
             import traceback
             self.logger.debug(f"Traceback: {traceback.format_exc()}")
+            raise StateError(f"Cannot determine active entities: {e}") from e
 
         total_active = sum(len(entities) for entities in active.values())
         self.logger.info(f"Found {total_active} active entities across {len(active)} domains")
@@ -302,18 +313,18 @@ class HomeAssistantInspector:
             domains = list(self.entities.keys())
             self.logger.debug(f"Found {len(domains)} domains")
             return sorted(domains)
-        except Exception as e:
+        except (HomeassistantAPIError, APIError) as e:
             self.logger.error(f"Error listing domains: {e}")
-            return []
+            raise APIError(f"Cannot list domains: {e}") from e
 
     def get_entity_count(self) -> int:
         """Get total count of all entities"""
         try:
             count = sum(len(group.entities) for group in self.entities.values())
             return count
-        except Exception as e:
+        except (HomeassistantAPIError, APIError) as e:
             self.logger.error(f"Error counting entities: {e}")
-            return 0
+            raise APIError(f"Cannot count entities: {e}") from e
 
     def get_domain_summary(self) -> Dict[str, int]:
         """
@@ -327,8 +338,9 @@ class HomeAssistantInspector:
         try:
             for domain, group in self.entities.items():
                 summary[domain] = len(group.entities)
-        except Exception as e:
+        except (HomeassistantAPIError, APIError) as e:
             self.logger.error(f"Error generating domain summary: {e}")
+            raise APIError(f"Cannot generate domain summary: {e}") from e
 
         return summary
 
@@ -344,9 +356,9 @@ class HomeAssistantInspector:
             try:
                 self._domains_cache = self.client.get_domains()
                 self.logger.info(f"Retrieved {len(self._domains_cache)} service domains")
-            except Exception as e:
+            except HomeassistantAPIError as e:
                 self.logger.error(f"Failed to fetch domains: {e}")
-                raise
+                raise APIError(f"Cannot retrieve service domains: {e}") from e
         return self._domains_cache
 
     def get_services_for_domain(self, domain: str) -> Optional[Domain]:
@@ -362,9 +374,9 @@ class HomeAssistantInspector:
         self.logger.debug(f"Getting services for domain: {domain}")
         try:
             return self.domains.get(domain)
-        except Exception as e:
+        except (HomeassistantAPIError, APIError) as e:
             self.logger.error(f"Error getting services for domain {domain}: {e}")
-            return None
+            raise APIError(f"Cannot retrieve services for domain '{domain}': {e}") from e
 
     def list_all_services(self) -> Dict[str, List[str]]:
         """
@@ -378,8 +390,9 @@ class HomeAssistantInspector:
         try:
             for domain_name, domain in self.domains.items():
                 services_map[domain_name] = list(domain.services.keys())
-        except Exception as e:
+        except (HomeassistantAPIError, APIError) as e:
             self.logger.error(f"Error listing services: {e}")
+            raise APIError(f"Cannot list services: {e}") from e
 
         return services_map
 
