@@ -26,6 +26,18 @@ Example:
 
 from .client import HomeAssistantInspector, setup_logger
 from .config import load_credentials, get_ha_url, get_ha_token
+from .exceptions import (
+    HomeAssistantError,
+    ConnectionError,
+    AuthenticationError,
+    EntityNotFoundError,
+    ServiceCallError,
+    StateError,
+    ConfigurationError,
+    APIError,
+    TimeoutError,
+    DeviceError,
+)
 
 __all__ = [
     'HomeAssistantInspector',
@@ -33,6 +45,17 @@ __all__ = [
     'load_credentials',
     'get_ha_url',
     'get_ha_token',
+    # Exceptions
+    'HomeAssistantError',
+    'ConnectionError',
+    'AuthenticationError',
+    'EntityNotFoundError',
+    'ServiceCallError',
+    'StateError',
+    'ConfigurationError',
+    'APIError',
+    'TimeoutError',
+    'DeviceError',
 ]
 
 __version__ = '0.2.0'

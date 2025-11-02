@@ -1,0 +1,15 @@
+# Phomemo PM-241-BT Label Printer Dependencies
+
+# Image processing
+Pillow>=10.0.0
+
+# Natural language interface (optional - for CLI only)
+anthropic>=0.40.0
+
+# Configuration
+python-dotenv>=1.0.0
+
+# REST API service
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+pydantic>=2.0.0

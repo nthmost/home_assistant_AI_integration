@@ -36,6 +36,8 @@ streamlit = "==1.41.1"
 
 [dev-packages]
 pytest = "==8.3.4"
+pytest-mock = "*"
+pytest-cov = "*"
 
 [requires]
 python_version = "3.12"

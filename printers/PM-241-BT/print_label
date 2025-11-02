@@ -1,0 +1,103 @@
+#!/usr/bin/env python3
+"""
+Natural language label printing CLI tool
+
+Usage:
+    print_label "print a label that says JUNTAWA"
+    print_label "make a label for Tea - Jasmine Green with a border"
+"""
+import sys
+import logging
+import argparse
+from pathlib import Path
+
+# Add label_printer to path
+sys.path.insert(0, str(Path(__file__).parent))
+
+from label_printer.formatter import LabelFormatter
+from label_printer.printer import PhomemoPrinter
+from label_printer.nl_interface import LabelCommandParser
+import label_printer.config as config
+
+
+def setup_logging(level=None):
+    """Configure colorful logging"""
+    level = level or config.LOG_LEVEL
+    logging.basicConfig(
+        level=getattr(logging, level.upper()),
+        format='%(message)s'
+    )
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description='Print labels using natural language commands',
+        epilog='Examples:\n'
+               '  print_label "print a label that says JUNTAWA"\n'
+               '  print_label "make a label for Kitchen with a border"\n',
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument('command', nargs='+', help='Natural language print command')
+    parser.add_argument('--no-print', action='store_true', help='Generate image but don\'t print')
+    parser.add_argument('--save', type=str, help='Save image to specified path')
+    parser.add_argument('--debug', action='store_true', help='Enable debug logging')
+    
+    args = parser.parse_args()
+    
+    # Setup logging
+    setup_logging('DEBUG' if args.debug else config.LOG_LEVEL)
+    logger = logging.getLogger(__name__)
+    
+    # Join command parts into single string
+    command = ' '.join(args.command)
+    
+    try:
+        # Parse natural language command
+        logger.info(f"\n🎯 Command: {command}\n")
+        parser = LabelCommandParser()
+        params = parser.parse_command(command)
+        
+        # Create label image
+        formatter = LabelFormatter()
+        img = formatter.create_label(
+            text=params['text'],
+            font_size=params.get('font_size'),
+            border=params.get('border', False)
+        )
+        
+        # Save image
+        image_path = config.TEMP_IMAGE_DIR / "label.png"
+        if args.save:
+            image_path = Path(args.save)
+        formatter.save_label(img, image_path)
+        
+        # Print unless --no-print
+        if not args.no_print:
+            printer = PhomemoPrinter()
+            
+            if not printer.check_printer_status():
+                logger.error("\n❌ Printer not ready. Use --no-print to generate image only.\n")
+                return 1
+            
+            if printer.print_image(image_path):
+                logger.info(f"\n✅ Label printed successfully!\n")
+                return 0
+            else:
+                logger.error(f"\n❌ Print failed. Image saved to: {image_path}\n")
+                return 1
+        else:
+            logger.info(f"\n✅ Image generated (not printed): {image_path}\n")
+            return 0
+            
+    except KeyboardInterrupt:
+        logger.info("\n\n⚠️  Cancelled by user\n")
+        return 130
+    except Exception as e:
+        logger.error(f"\n❌ Error: {e}\n")
+        if args.debug:
+            raise
+        return 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())

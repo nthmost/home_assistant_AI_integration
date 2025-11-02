@@ -2,9 +2,19 @@
 
 ## Python Code Standards
 
+### Dependency Management
+- **Always use `pipenv`** for dependency management
+- Use `Pipfile` and `Pipfile.lock` - never manual requirements.txt maintenance
+- Run scripts with `pipenv run python script.py` or activate with `pipenv shell`
+- Add dependencies with `pipenv install <package>` (production) or `pipenv install --dev <package>` (development)
+
 ### Exception Handling
 - **Avoid long try-except blocks** - keep them focused and minimal
 - **Never use generic `Exception`** - always catch specific exception types
+- **Develop a shared exception hierarchy** across modules in this project
+  - Create custom exceptions that inherit from a common base (e.g., `HomeAssistantError`)
+  - Place exception classes in a central location (e.g., `ha_core/exceptions.py`)
+  - Use specific exceptions for specific failure modes (e.g., `EntityNotFoundError`, `ServiceCallError`)
 - Use multiple specific exception handlers rather than one broad catch-all
 
 ### Logging Standards
@@ -52,6 +62,20 @@
 - Let Streamlit's reactive model work for you - don't fight it with manual reruns
 - Pattern: Fetch state → Render UI → Handle interactions → (Streamlit reruns automatically)
 
+### Testing Strategy
+- **Think test-driven development** - consider testability from the start
+- **Prototyping vs Production**: We're prototyping until we're not
+  - Use `demo_*.py`, `try_*.py` scripts for experimental/prototype code
+  - When a feature is ready to formalize, ask the user before creating tests
+  - Once formalized, create proper `pytest`-compatible tests in `tests/` directory
+- **Test requirements**:
+  - Use `pytest` as the testing framework
+  - Place all tests in `tests/` directory with `test_*.py` naming
+  - Write tests that are isolated, repeatable, and fast
+  - Mock external dependencies (Home Assistant API, network calls, etc.)
+  - Use fixtures for common test setup
+- **Install test dependencies**: `pipenv install --dev pytest pytest-mock pytest-cov`
+
 ## Collaboration Style
 
 ### Decision Making
@@ -62,4 +86,4 @@
 
 ---
 
-**Last Updated:** October 2025
+**Last Updated:** November 2025
