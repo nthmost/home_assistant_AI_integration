@@ -41,6 +41,10 @@ ENV/
 *.token
 secrets.yaml
 secrets.json
+api_key*.txt
+*_key.txt
+*.key
+credentials*.txt
 
 # Logs
 *.log
@@ -48,3 +52,7 @@ secrets.json
 # OS
 .DS_Store
 Thumbs.db
+
+# Local development directories (keep folder, ignore contents)
+results/*
+!results/.gitkeep

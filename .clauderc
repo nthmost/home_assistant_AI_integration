@@ -1,0 +1,64 @@
+# Claude Code Configuration for Home Assistant AI Integration Project
+
+# Git operations
+Bash(git:*)
+Bash(gh:*)
+
+# General bash commands
+Bash(*)
+
+# Python operations
+Bash(python:*)
+Bash(python3:*)
+Bash(pip:*)
+Bash(pip3:*)
+Bash(venv/bin/python:*)
+Bash(venv/bin/pip:*)
+
+# File operations - read from anywhere on the system
+Read(//**)
+
+# File operations - write/edit within project
+Write(/home/nthmost/projects/git/home_assistant_AI_integration/**)
+Edit(/home/nthmost/projects/git/home_assistant_AI_integration/**)
+
+# SSH to specific hosts
+Bash(ssh nike.local:*)
+Bash(ssh loki.local:*)
+Bash(rsync:*nike.local:*)
+Bash(rsync:*loki.local:*)
+
+# Web operations
+WebSearch
+WebFetch(domain:homeassistant.local)
+WebFetch(domain:www.home-assistant.io)
+WebFetch(domain:homeassistantapi.readthedocs.io)
+
+# Common utilities
+Bash(curl:*)
+Bash(wget:*)
+Bash(cat:*)
+Bash(ls:*)
+Bash(tree:*)
+Bash(mkdir:*)
+Bash(chmod:*)
+Bash(chown:*)
+
+# Development tools
+Bash(npm:*)
+Bash(yarn:*)
+Bash(docker:*)
+Bash(systemctl:*)
+
+# Network tools
+Bash(ping:*)
+Bash(netstat:*)
+Bash(ss:*)
+Bash(lsusb:*)
+
+# Process management
+Bash(ps:*)
+Bash(top:*)
+Bash(htop:*)
+Bash(kill:*)
+Bash(pkill:*)
