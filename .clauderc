@@ -2,6 +2,7 @@
 
 # Git operations
 Bash(git:*)
+Bash(git push:*)
 Bash(gh:*)
 
 # General bash commands
