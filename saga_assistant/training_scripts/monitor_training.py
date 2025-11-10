@@ -119,6 +119,7 @@ def get_log_status(log_files):
         'mode': 'unknown',  # download, generate, augment, train, complete
         'phase': 'Unknown',
         'wake_word': None,  # Extract wake word being trained
+        'tier': None,  # Extract training tier (basic, noisy, etc.)
         'current_file': 'Unknown',
         'download_progress': None,
         'training_progress': None,
@@ -149,6 +150,16 @@ def get_log_status(log_files):
                     wake_word = wake_word.split('|')[0].strip()
                     if wake_word and len(wake_word) < 50:  # Sanity check
                         status['wake_word'] = wake_word
+
+            # Extract tier from "Tier: noisy"
+            if not status['tier'] and 'Tier:' in line:
+                parts = line.split('Tier:')
+                if len(parts) > 1:
+                    tier = parts[1].strip()
+                    # Clean up any extra formatting
+                    tier = tier.split('|')[0].strip()
+                    if tier and len(tier) < 20:  # Sanity check
+                        status['tier'] = tier
 
             # Detect training phases from emoji markers
             if '🧠 TRAIN' in line and status['mode'] == 'unknown':
@@ -247,20 +258,23 @@ def get_log_status(log_files):
 def create_display(status):
     """Create rich display table based on current mode"""
 
-    # Determine title based on mode - include wake word if available
+    # Build display string with wake word and tier
+    context_parts = []
     if status['wake_word']:
-        wake_word_display = f"'{status['wake_word']}'"
-    else:
-        wake_word_display = ""
+        context_parts.append(f"'{status['wake_word']}'")
+    if status['tier']:
+        context_parts.append(f"[{status['tier']}]")
+
+    context_display = " ".join(context_parts) if context_parts else ""
 
     titles = {
-        'download': f'📥 Dataset Download {wake_word_display}',
-        'download_complete': f'✅ Downloads Complete {wake_word_display}',
-        'generate': f'🎤 Generating Samples {wake_word_display}',
-        'patch': f'🔧 Fixing Sample Rates {wake_word_display}',
-        'augment': f'🔊 Augmenting Audio {wake_word_display}',
-        'train': f'🧠 Training Model {wake_word_display}',
-        'complete': f'🎉 Training Complete {wake_word_display}',
+        'download': f'📥 Dataset Download {context_display}',
+        'download_complete': f'✅ Downloads Complete {context_display}',
+        'generate': f'🎤 Generating Samples {context_display}',
+        'patch': f'🔧 Fixing Sample Rates {context_display}',
+        'augment': f'🔊 Augmenting Audio {context_display}',
+        'train': f'🧠 Training Model {context_display}',
+        'complete': f'🎉 Training Complete {context_display}',
         'unknown': '⏳ Monitoring'
     }
     title = titles.get(status['mode'], '⏳ Monitoring')
