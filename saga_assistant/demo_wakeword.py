@@ -49,7 +49,77 @@ def list_available_models():
     return list(oww_model.models.keys())
 
 
-def run_wakeword_detection(device_idx, duration=30, threshold=0.5, custom_model_path=None):
+def process_audio_stream(stream, oww_model, threshold, cooldown_period, duration, start_time):
+    """
+    Process audio stream and detect wakewords.
+
+    Args:
+        stream: Audio input stream
+        oww_model: OpenWakeWord model instance
+        threshold: Detection threshold
+        cooldown_period: Seconds to wait before re-triggering
+        duration: Total duration to run (0 for infinite)
+        start_time: Start timestamp
+
+    Returns:
+        dict: Detection counts per model
+    """
+    detection_count = {model: 0 for model in oww_model.models.keys()}
+    last_detection_time = {model: 0 for model in oww_model.models.keys()}
+    chunk_size = 1280  # 80ms chunks
+
+    while True:
+        # Check duration
+        if duration > 0 and (time.time() - start_time) > duration:
+            break
+
+        # Read audio chunk
+        audio_data, overflowed = stream.read(chunk_size)
+
+        if overflowed:
+            logger.warning("⚠️  Audio buffer overflow - some data lost")
+
+        # Convert to the format OpenWakeWord expects
+        audio_data = audio_data.flatten()
+
+        # Run prediction
+        predictions = oww_model.predict(audio_data)
+
+        # Check each model's predictions
+        current_time = time.time()
+        for model_name, score in predictions.items():
+            # Only trigger if score is above threshold and cooldown has passed
+            time_since_last = current_time - last_detection_time[model_name]
+
+            if score > threshold and time_since_last > cooldown_period:
+                detection_count[model_name] += 1
+                last_detection_time[model_name] = current_time
+                elapsed = current_time - start_time
+                logger.info(
+                    f"🔔 DETECTED: '{model_name}' "
+                    f"(score: {score:.3f}) at {elapsed:.1f}s"
+                )
+
+    return detection_count
+
+
+def print_detection_summary(detection_count, elapsed):
+    """Print summary of detections."""
+    logger.info("="*60)
+    logger.info(f"📊 Detection Summary ({elapsed:.1f}s total)")
+    logger.info("="*60)
+
+    if any(detection_count.values()):
+        for model_name, count in detection_count.items():
+            if count > 0:
+                logger.info(f"   '{model_name}': {count} detections")
+    else:
+        logger.info("   No wakewords detected")
+
+    logger.info("="*60)
+
+
+def run_wakeword_detection(device_idx, duration=30, threshold=0.5, custom_model_path=None, cooldown=2.0):
     """
     Run live wakeword detection.
 
@@ -58,10 +128,12 @@ def run_wakeword_detection(device_idx, duration=30, threshold=0.5, custom_model_
         duration: How long to listen (seconds), 0 for infinite
         threshold: Detection threshold (0.0-1.0)
         custom_model_path: Path to custom trained model (optional)
+        cooldown: Cooldown period in seconds to prevent re-triggering (default: 2.0)
     """
     logger.info(f"🎙️  Starting wakeword detection (threshold: {threshold})")
     logger.info(f"   Device: {sd.query_devices(device_idx)['name']}")
     logger.info(f"   Duration: {'Infinite' if duration == 0 else f'{duration}s'}")
+    logger.info(f"   Cooldown: {cooldown}s (debounce)")
     logger.info(f"   Press Ctrl+C to stop")
     logger.info("")
 
@@ -84,8 +156,8 @@ def run_wakeword_detection(device_idx, duration=30, threshold=0.5, custom_model_
     logger.info(f"🎧 Listening for wakewords...")
     logger.info("="*60)
 
-    detection_count = {model: 0 for model in oww_model.models.keys()}
     start_time = time.time()
+    detection_count = {}
 
     try:
         with sd.InputStream(
@@ -95,33 +167,9 @@ def run_wakeword_detection(device_idx, duration=30, threshold=0.5, custom_model_
             blocksize=chunk_size,
             dtype=np.int16
         ) as stream:
-
-            while True:
-                # Check duration
-                if duration > 0 and (time.time() - start_time) > duration:
-                    break
-
-                # Read audio chunk
-                audio_data, overflowed = stream.read(chunk_size)
-
-                if overflowed:
-                    logger.warning("⚠️  Audio buffer overflow - some data lost")
-
-                # Convert to the format OpenWakeWord expects
-                audio_data = audio_data.flatten()
-
-                # Run prediction
-                predictions = oww_model.predict(audio_data)
-
-                # Check each model's predictions
-                for model_name, score in predictions.items():
-                    if score > threshold:
-                        detection_count[model_name] += 1
-                        elapsed = time.time() - start_time
-                        logger.info(
-                            f"🔔 DETECTED: '{model_name}' "
-                            f"(score: {score:.3f}) at {elapsed:.1f}s"
-                        )
+            detection_count = process_audio_stream(
+                stream, oww_model, threshold, cooldown, duration, start_time
+            )
 
     except KeyboardInterrupt:
         logger.info("\n⏹️  Stopped by user")
@@ -131,20 +179,8 @@ def run_wakeword_detection(device_idx, duration=30, threshold=0.5, custom_model_
         raise
 
     finally:
-        # Print summary
         elapsed = time.time() - start_time
-        logger.info("="*60)
-        logger.info(f"📊 Detection Summary ({elapsed:.1f}s total)")
-        logger.info("="*60)
-
-        if any(detection_count.values()):
-            for model_name, count in detection_count.items():
-                if count > 0:
-                    logger.info(f"   '{model_name}': {count} detections")
-        else:
-            logger.info("   No wakewords detected")
-
-        logger.info("="*60)
+        print_detection_summary(detection_count, elapsed)
 
 
 def main():
@@ -168,6 +204,12 @@ def main():
         type=float,
         default=0.5,
         help="Detection threshold 0.0-1.0 (default: 0.5)"
+    )
+    parser.add_argument(
+        "--cooldown",
+        type=float,
+        default=2.0,
+        help="Cooldown period in seconds to prevent re-triggering (default: 2.0)"
     )
     args = parser.parse_args()
 
@@ -199,7 +241,8 @@ def main():
             device_idx,
             duration=args.duration,
             threshold=args.threshold,
-            custom_model_path=str(model_path)
+            custom_model_path=str(model_path),
+            cooldown=args.cooldown
         )
     else:
         # List available models
@@ -220,7 +263,8 @@ def main():
         run_wakeword_detection(
             device_idx,
             duration=args.duration,
-            threshold=args.threshold
+            threshold=args.threshold,
+            cooldown=args.cooldown
         )
 
     logger.info("")
