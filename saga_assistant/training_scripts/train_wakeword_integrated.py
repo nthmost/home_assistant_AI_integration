@@ -97,13 +97,45 @@ class WakeWordTrainer:
         self.current_phase = phase
         logger.log(level, message, extra={'phase': phase})
 
-    def load_and_customize_config(self, wake_phrase, model_name, n_samples=5000):
-        """Load example config and customize for target wake phrase"""
+    # Training tier configurations
+    # Centralized definitions - easy to add new tiers or rename existing ones
+    TRAINING_TIERS = {
+        'basic': {
+            'description': 'Standard training with music/ambient noise',
+            'include_speech_noise': False,
+            'snr_range': (0, 15),  # Signal-to-noise ratio in dB
+            'steps': 20000,
+        },
+        'noisy': {
+            'description': 'Robust training with competing speech and low SNR',
+            'include_speech_noise': True,
+            'snr_range': (-6, 10),  # Lower SNR = more challenging conditions
+            'steps': 25000,  # More steps for harder training
+        }
+    }
+
+    def load_and_customize_config(self, wake_phrase, model_name, n_samples=5000, tier='basic'):
+        """Load example config and customize for target wake phrase
+
+        Args:
+            wake_phrase: Wake phrase to train (e.g., "hey saga")
+            model_name: Name for the model
+            n_samples: Number of training samples
+            tier: Training tier ('basic' or 'noisy')
+        """
         self.log_phase('check', f"Loading config from {self.config_path}")
 
         if not self.config_path.exists():
             logger.error(f"Config file not found: {self.config_path}")
             return False
+
+        # Validate tier
+        if tier not in self.TRAINING_TIERS:
+            logger.error(f"Unknown training tier: {tier}. Available: {list(self.TRAINING_TIERS.keys())}")
+            return False
+
+        tier_config = self.TRAINING_TIERS[tier]
+        self.log_phase('check', f"Training tier: {tier} - {tier_config['description']}")
 
         with open(self.config_path, 'r') as f:
             self.config = yaml.safe_load(f)
@@ -111,10 +143,10 @@ class WakeWordTrainer:
         # Customize config
         self.log_phase('check', f"Configuring for '{wake_phrase}'...")
         self.config["target_phrase"] = [wake_phrase]
-        self.config["model_name"] = model_name
+        self.config["model_name"] = f"{model_name}_{tier}"  # Add tier suffix to model name
         self.config["n_samples"] = n_samples
         self.config["n_samples_val"] = max(1000, n_samples // 5)
-        self.config["steps"] = 20000
+        self.config["steps"] = tier_config['steps']
         self.config["target_accuracy"] = 0.7
         self.config["target_recall"] = 0.5
         self.config["target_fp_per_hour"] = 0.2
@@ -124,10 +156,21 @@ class WakeWordTrainer:
         for base in ['.', './data']:
             audioset_path = Path(base) / 'audioset_16k'
             fma_path = Path(base) / 'fma'
+            speech_path = Path(base) / 'speech_noise'  # For competing speech
+
             if audioset_path.exists() and len(list(audioset_path.glob('*'))) > 0:
                 background_paths.append(str(audioset_path))
             if fma_path.exists() and len(list(fma_path.glob('*'))) > 0:
                 background_paths.append(str(fma_path))
+
+            # Add speech noise for 'noisy' tier
+            if tier_config['include_speech_noise']:
+                if speech_path.exists() and len(list(speech_path.glob('*'))) > 0:
+                    background_paths.append(str(speech_path))
+                    self.log_phase('check', f"Including speech noise from {speech_path}")
+                else:
+                    logger.warning(f"Speech noise requested but not found at {speech_path}")
+                    logger.warning("Training will continue with music/ambient noise only")
 
         # Detect RIR path
         rir_path = "./mit_rirs" if Path("./mit_rirs").exists() else "./data/mit_rirs"
@@ -244,18 +287,26 @@ class WakeWordTrainer:
         self.log_phase(phase, f"Complete!", logging.INFO)
         return True
 
-    def train(self, wake_phrase, model_name, n_samples=5000):
-        """Execute full training pipeline"""
+    def train(self, wake_phrase, model_name, n_samples=5000, tier='basic'):
+        """Execute full training pipeline
+
+        Args:
+            wake_phrase: Wake phrase to train (e.g., "hey saga")
+            model_name: Base name for the model (tier will be appended)
+            n_samples: Number of training samples
+            tier: Training tier ('basic' or 'noisy')
+        """
 
         self.log_phase('check', "="*70)
         self.log_phase('check', "Wake Word Model Training")
         self.log_phase('check', f"Phrase: {wake_phrase}")
         self.log_phase('check', f"Model: {model_name}")
+        self.log_phase('check', f"Tier: {tier}")
         self.log_phase('check', f"Samples: {n_samples}")
         self.log_phase('check', "="*70)
 
         # Load config
-        if not self.load_and_customize_config(wake_phrase, model_name, n_samples):
+        if not self.load_and_customize_config(wake_phrase, model_name, n_samples, tier):
             return False
 
         clips_dir = Path(self.config["output_dir"]) / self.config["model_name"]
@@ -342,11 +393,18 @@ def main():
 
     parser = argparse.ArgumentParser(
         description="Train wake word with integrated monitoring",
-        usage="%(prog)s PHRASE [options]"
+        usage="%(prog)s PHRASE [options]",
+        epilog=f"Available training tiers: {', '.join(WakeWordTrainer.TRAINING_TIERS.keys())}"
     )
     parser.add_argument("phrase", help="Wake phrase (e.g., 'hey saga')")
     parser.add_argument("--model-name", help="Model name (default: auto-generated from phrase)")
     parser.add_argument("--samples", type=int, default=5000, help="Training samples (default: 5000)")
+    parser.add_argument(
+        "--tier",
+        choices=list(WakeWordTrainer.TRAINING_TIERS.keys()),
+        default='basic',
+        help="Training tier: 'basic' (standard) or 'noisy' (robust to competing speech) (default: basic)"
+    )
 
     args = parser.parse_args()
 
@@ -364,7 +422,7 @@ def main():
 
     trainer = WakeWordTrainer()
 
-    if trainer.train(args.phrase, model_name, args.samples):
+    if trainer.train(args.phrase, model_name, args.samples, args.tier):
         return 0
     else:
         return 1
