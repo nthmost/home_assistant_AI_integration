@@ -9,31 +9,50 @@ Saga Assistant is a privacy-focused voice assistant that runs entirely on your l
 ## Goals
 
 - ✅ **100% LAN-based operation** - No internet required after initial setup
-- ✅ **Custom wakeword** - "Hey Saga" (with "Hey Eris" and "Hey Cera" as alternatives)
-- 🔄 **Voice pipeline** - Wake word → STT → LLM → TTS (in development)
-- 🔄 **Home Assistant integration** - Control smart home with voice commands
+- ✅ **Custom wakeword** - "Hey Saga" trained with noisy tier
+- ✅ **Complete voice pipeline** - Wake word → STT → LLM → TTS
+- 🔄 **Home Assistant integration** - Control smart home with voice commands (planned)
 
 ## Current Status
 
-### ✅ Completed: Wakeword Detection
+### ✅ Phase 1 Complete: Wakeword Detection
 
 - OpenWakeWord v0.6.0 installed and configured
-- ONNX Runtime for macOS ARM64 inference
+- Custom "Hey Saga" model trained with noisy tier (robust to background speech)
 - EMEET OfficeCore M0 Plus audio device configured
-- 6 pre-trained models working (alexa, hey_jarvis, hey_mycroft, etc.)
-- Demo scripts ready for testing
+- Demo: `pipenv run python demo_wakeword.py`
 
-### 🔄 In Progress: Custom Model Training
+### ✅ Phase 2 Complete: Full Voice Pipeline
 
-- **Next:** Train "Hey Saga" model using Google Colab
-- **Notebook:** https://colab.research.google.com/drive/1q1oe2zOyZp7UsB3jJiQ1IFn8z5YfjwEb
+**All components working:**
 
-### 📋 Planned: Full Voice Pipeline
+1. ✅ **STT (Speech-to-Text)** - faster-whisper base model (~317ms)
+   - Demo: `pipenv run python demo_stt.py`
+   - Auto-detects EMEET microphone
+   - Supports 5-second utterances
 
-1. **STT (Speech-to-Text)** - faster-whisper (local inference)
-2. **LLM (Intent Processing)** - Ollama on loki.local (qwen2.5:7b)
-3. **TTS (Text-to-Speech)** - Piper (local synthesis)
-4. **Home Assistant Integration** - REST API for device control
+2. ✅ **LLM (Language Model)** - qwen2.5:7b on loki.local (~672ms)
+   - Demo: `pipenv run python demo_llm.py`
+   - OpenAI-compatible API via Ollama
+   - Conversational responses optimized for voice
+
+3. ✅ **TTS (Text-to-Speech)** - Piper (~84ms synthesis)
+   - Demo: `pipenv run python demo_tts.py`
+   - **Default voice:** `en_GB-semaine-medium` (British multi-speaker)
+   - **Preferred voices:** alba, semaine, cori (all British, fast, pleasant)
+   - 6 voices downloaded and ready
+
+4. ✅ **Complete Integration** - Full voice assistant working!
+   - Run: `pipenv run python run_assistant.py`
+   - **Total latency:** ~1.2-1.3 seconds (well under 2s target!)
+   - State machine: idle → listening → processing → speaking
+
+### 📋 Phase 3 Next: Home Assistant Integration
+
+- REST API connection to Home Assistant
+- Device control commands
+- Status queries
+- Natural language automation
 
 ## Hardware Setup
 
@@ -87,8 +106,14 @@ saga_assistant/
 ├── WAKEWORD_SETUP.md           # Detailed setup documentation
 ├── demo_audio_devices.py       # Audio device testing tool
 ├── demo_wakeword.py            # Live wakeword detection demo
-└── models/                     # Custom trained models (future)
-    └── hey_saga.onnx          # Custom "Hey Saga" model (to be trained)
+├── demo_stt.py                 # Speech-to-text testing (faster-whisper)
+├── demo_llm.py                 # LLM integration testing (qwen2.5:7b)
+├── demo_tts.py                 # Text-to-speech testing (Piper)
+├── run_assistant.py            # Complete voice assistant
+├── models/                     # Custom trained models
+│   ├── hey_saga.onnx          # Custom "Hey Saga" model (basic tier)
+│   └── hey_saga_noisy.onnx    # Custom "Hey Saga" model (noisy tier, default)
+└── training_scripts/           # Training pipeline with tier support
 ```
 
 ## Training Custom "Hey Saga" Model
@@ -151,6 +176,9 @@ onnxruntime          # ONNX inference (macOS ARM64)
 sounddevice          # Audio I/O
 pyaudio              # Audio backend
 numpy                # Audio processing
+faster-whisper       # Speech-to-text (Whisper base model)
+openai               # LLM client (OpenAI-compatible API)
+piper-tts            # Text-to-speech (Piper)
 ```
 
 ## Troubleshooting
@@ -178,34 +206,34 @@ Make sure scripts use `inference_framework="onnx"` when creating Model instances
 - [x] OpenWakeWord setup
 - [x] Audio device configuration
 - [x] Pre-trained model testing
-- [ ] Custom "Hey Saga" model training
+- [x] Custom "Hey Saga" model training (basic + noisy tiers)
 
-### Phase 2: Speech-to-Text 📋
-- [ ] Install faster-whisper
-- [ ] Test STT latency
-- [ ] Optimize for <300ms transcription
+### Phase 2: Full Voice Pipeline ✅
+- [x] Install faster-whisper for STT
+- [x] Test STT latency (~317ms with base model)
+- [x] Install Piper TTS
+- [x] Voice selection (semaine, alba, cori preferred)
+- [x] Connect to Ollama on loki.local for LLM inference
+- [x] Complete integration (run_assistant.py)
+- [x] Total latency optimization (~1.2-1.3s, well under 2s target!)
 
-### Phase 3: LLM Integration 📋
-- [ ] Connect to Ollama on loki.local
-- [ ] Intent classification
-- [ ] Home Assistant command parsing
-
-### Phase 4: Text-to-Speech 📋
-- [ ] Install Piper TTS
-- [ ] Voice selection
-- [ ] Optimize for <200ms synthesis
-
-### Phase 5: Home Assistant Integration 📋
+### Phase 3: Home Assistant Integration 📋
 - [ ] REST API connection
 - [ ] Device control commands
 - [ ] Status queries
-- [ ] Automation triggers
+- [ ] Natural language automation
 
-### Phase 6: Complete Pipeline 📋
-- [ ] Full wake → speak → respond flow
-- [ ] Error handling
-- [ ] Latency optimization (<2s total)
-- [ ] Production deployment
+### Phase 4: Advanced Features 📋
+- [ ] Dynamic VAD for variable-length utterances (Silero or WebRTC)
+- [ ] Intent classification
+- [ ] Context awareness across conversations
+- [ ] Error handling improvements
+
+### Phase 5: Production Deployment 📋
+- [ ] System service configuration
+- [ ] Auto-restart on failure
+- [ ] Long-term stability testing
+- [ ] Performance monitoring
 
 ## Links & Resources
 
@@ -217,5 +245,7 @@ Make sure scripts use `inference_framework="onnx"` when creating Model instances
 ---
 
 **Project Started:** 2025-11-09
-**Current Phase:** Phase 1 - Wakeword Detection
-**Next Milestone:** Train custom "Hey Saga" model
+**Phase 1 Complete:** 2025-11-09 (Wakeword Detection)
+**Phase 2 Complete:** 2025-11-10 (Full Voice Pipeline)
+**Current Phase:** Phase 3 - Home Assistant Integration
+**Next Milestone:** REST API connection to Home Assistant

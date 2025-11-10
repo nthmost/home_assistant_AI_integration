@@ -37,6 +37,9 @@ pyaudio = "*"
 sounddevice = "*"
 openwakeword = "*"
 onnxruntime = "*"
+faster-whisper = "*"
+piper-tts = "*"
+openai = "*"
 
 [dev-packages]
 pytest = "==8.3.4"

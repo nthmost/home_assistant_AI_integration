@@ -116,12 +116,18 @@ Custom wakeword-based voice assistant for Home Assistant integration.
 
 **Current Status:** Phase 1 - Wakeword Detection (✅ Complete)
 
+**Default Wakeword Model:** `saga_assistant/models/hey_saga_noisy.onnx`
+- Trained with "noisy" tier for robust performance with competing speech
+- Use this model for all Saga assistant testing and development
+- More tolerant to background noise and conversation than basic tier
+
 **Key Files:**
 - `saga_assistant/README.md` - Main documentation and roadmap
 - `saga_assistant/WAKEWORD_SETUP.md` - Detailed technical setup guide
 - `saga_assistant/demo_audio_devices.py` - Audio device testing tool
 - `saga_assistant/demo_wakeword.py` - Live wakeword detection demo
-- `saga_assistant/models/` - Custom trained models (future)
+- `saga_assistant/models/hey_saga_noisy.onnx` - Production wakeword model (default)
+- `saga_assistant/training_scripts/` - Training pipeline with tier support
 
 **Technology Stack:**
 - OpenWakeWord v0.6.0 (wakeword detection)
@@ -129,8 +135,12 @@ Custom wakeword-based voice assistant for Home Assistant integration.
 - sounddevice + pyaudio (audio I/O)
 - Python 3.13 (via pipenv)
 
+**Training Tiers:**
+- `basic`: Standard training with music/ambient noise (20k steps, SNR 0-15dB)
+- `noisy`: Robust training with competing speech (25k steps, SNR -6-10dB) ⭐ **Default**
+
 **Next Steps:**
-1. Train custom "Hey Saga" model using Google Colab
+1. ✅ ~~Train custom "Hey Saga" model~~ - Complete (using noisy tier)
 2. Implement STT with faster-whisper
 3. Integrate LLM on loki.local
 4. Add TTS with Piper
