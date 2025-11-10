@@ -49,7 +49,7 @@ def list_available_models():
     return list(oww_model.models.keys())
 
 
-def process_audio_stream(stream, oww_model, threshold, cooldown_period, duration, start_time):
+def process_audio_stream(stream, oww_model, threshold, cooldown_period, duration, start_time, debug=False):
     """
     Process audio stream and detect wakewords.
 
@@ -60,6 +60,7 @@ def process_audio_stream(stream, oww_model, threshold, cooldown_period, duration
         cooldown_period: Seconds to wait before re-triggering
         duration: Total duration to run (0 for infinite)
         start_time: Start timestamp
+        debug: Show all scores above 0.3 for debugging
 
     Returns:
         dict: Detection counts per model
@@ -67,6 +68,7 @@ def process_audio_stream(stream, oww_model, threshold, cooldown_period, duration
     detection_count = {model: 0 for model in oww_model.models.keys()}
     last_detection_time = {model: 0 for model in oww_model.models.keys()}
     chunk_size = 1280  # 80ms chunks
+    debug_threshold = 0.3  # Show scores above this in debug mode
 
     while True:
         # Check duration
@@ -87,14 +89,28 @@ def process_audio_stream(stream, oww_model, threshold, cooldown_period, duration
 
         # Check each model's predictions
         current_time = time.time()
+        elapsed = current_time - start_time
+
         for model_name, score in predictions.items():
+            # Debug mode: show all significant scores
+            if debug and score > debug_threshold:
+                time_since_last = current_time - last_detection_time[model_name]
+                in_cooldown = time_since_last <= cooldown_period
+                cooldown_status = f"[COOLDOWN {cooldown_period - time_since_last:.1f}s left]" if in_cooldown else ""
+
+                logger.debug(
+                    f"📊 {elapsed:6.1f}s | '{model_name}' | "
+                    f"score: {score:.3f} | "
+                    f"threshold: {threshold:.2f} | "
+                    f"{cooldown_status}"
+                )
+
             # Only trigger if score is above threshold and cooldown has passed
             time_since_last = current_time - last_detection_time[model_name]
 
             if score > threshold and time_since_last > cooldown_period:
                 detection_count[model_name] += 1
                 last_detection_time[model_name] = current_time
-                elapsed = current_time - start_time
                 logger.info(
                     f"🔔 DETECTED: '{model_name}' "
                     f"(score: {score:.3f}) at {elapsed:.1f}s"
@@ -119,7 +135,7 @@ def print_detection_summary(detection_count, elapsed):
     logger.info("="*60)
 
 
-def run_wakeword_detection(device_idx, duration=30, threshold=0.5, custom_model_path=None, cooldown=2.0):
+def run_wakeword_detection(device_idx, duration=30, threshold=0.5, custom_model_path=None, cooldown=2.0, debug=False):
     """
     Run live wakeword detection.
 
@@ -129,11 +145,14 @@ def run_wakeword_detection(device_idx, duration=30, threshold=0.5, custom_model_
         threshold: Detection threshold (0.0-1.0)
         custom_model_path: Path to custom trained model (optional)
         cooldown: Cooldown period in seconds to prevent re-triggering (default: 2.0)
+        debug: Show all scores above 0.3 for debugging (default: False)
     """
     logger.info(f"🎙️  Starting wakeword detection (threshold: {threshold})")
     logger.info(f"   Device: {sd.query_devices(device_idx)['name']}")
     logger.info(f"   Duration: {'Infinite' if duration == 0 else f'{duration}s'}")
     logger.info(f"   Cooldown: {cooldown}s (debounce)")
+    if debug:
+        logger.info(f"   Debug: ON (showing scores > 0.3)")
     logger.info(f"   Press Ctrl+C to stop")
     logger.info("")
 
@@ -168,7 +187,7 @@ def run_wakeword_detection(device_idx, duration=30, threshold=0.5, custom_model_
             dtype=np.int16
         ) as stream:
             detection_count = process_audio_stream(
-                stream, oww_model, threshold, cooldown, duration, start_time
+                stream, oww_model, threshold, cooldown, duration, start_time, debug
             )
 
     except KeyboardInterrupt:
@@ -211,6 +230,11 @@ def main():
         default=2.0,
         help="Cooldown period in seconds to prevent re-triggering (default: 2.0)"
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Show all scores above 0.3 for debugging"
+    )
     args = parser.parse_args()
 
     logger.info("🎵 OpenWakeWord Detection Demo")
@@ -242,7 +266,8 @@ def main():
             duration=args.duration,
             threshold=args.threshold,
             custom_model_path=str(model_path),
-            cooldown=args.cooldown
+            cooldown=args.cooldown,
+            debug=args.debug
         )
     else:
         # List available models
@@ -264,7 +289,8 @@ def main():
             device_idx,
             duration=args.duration,
             threshold=args.threshold,
-            cooldown=args.cooldown
+            cooldown=args.cooldown,
+            debug=args.debug
         )
 
     logger.info("")
