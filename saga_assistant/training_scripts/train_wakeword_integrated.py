@@ -153,6 +153,8 @@ class WakeWordTrainer:
 
         # Auto-detect background paths (check both old and new locations)
         background_paths = []
+        speech_noise_found = False
+
         for base in ['.', './data']:
             audioset_path = Path(base) / 'audioset_16k'
             fma_path = Path(base) / 'fma'
@@ -168,9 +170,12 @@ class WakeWordTrainer:
                 if speech_path.exists() and len(list(speech_path.glob('*'))) > 0:
                     background_paths.append(str(speech_path))
                     self.log_phase('check', f"Including speech noise from {speech_path}")
-                else:
-                    logger.warning(f"Speech noise requested but not found at {speech_path}")
-                    logger.warning("Training will continue with music/ambient noise only")
+                    speech_noise_found = True
+
+        # Only warn if speech noise was requested but not found anywhere
+        if tier_config['include_speech_noise'] and not speech_noise_found:
+            logger.warning("Speech noise requested but not found in './speech_noise' or './data/speech_noise'")
+            logger.warning("Training will continue with music/ambient noise only")
 
         # Detect RIR path
         rir_path = "./mit_rirs" if Path("./mit_rirs").exists() else "./data/mit_rirs"
