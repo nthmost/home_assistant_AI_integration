@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
 Monitor dataset downloads and training progress with a nice visual interface
-Watches multiple log files and adapts display based on current phase
+Reads state from JSON file and logs for real-time progress
 """
 
 import os
 import sys
 import time
 import re
+import json
 from pathlib import Path
 from rich.console import Console
 from rich.table import Table
@@ -113,13 +114,26 @@ def format_size(kb):
     else:
         return f"{kb/(1024*1024):.2f}G"
 
+def load_state_file(state_path='training_state.json'):
+    """Load state from JSON file"""
+    try:
+        if Path(state_path).exists():
+            with open(state_path, 'r') as f:
+                return json.load(f)
+    except Exception as e:
+        pass
+    return {}
+
 def get_log_status(log_files):
-    """Get current status from all available log files"""
+    """Get current status from state file and log files"""
+    # Start with state from JSON file
+    state_data = load_state_file()
+
     status = {
         'mode': 'unknown',  # download, generate, augment, train, complete
-        'phase': 'Unknown',
-        'wake_word': None,  # Extract wake word being trained
-        'tier': None,  # Extract training tier (basic, noisy, etc.)
+        'phase': state_data.get('phase', 'Unknown'),
+        'wake_word': state_data.get('wake_word'),  # From JSON state
+        'tier': state_data.get('tier'),  # From JSON state
         'current_file': 'Unknown',
         'download_progress': None,
         'training_progress': None,
@@ -137,29 +151,9 @@ def get_log_status(log_files):
         except:
             continue
 
-        # First pass: detect current phase and wake word (check most recent lines first)
+        # First pass: detect current phase from emoji markers (check most recent lines first)
         for line in reversed(lines):
             line = line.strip()
-
-            # Extract wake word from "Phrase: hey saga"
-            if not status['wake_word'] and 'Phrase:' in line:
-                parts = line.split('Phrase:')
-                if len(parts) > 1:
-                    wake_word = parts[1].strip()
-                    # Clean up any emoji or extra formatting
-                    wake_word = wake_word.split('|')[0].strip()
-                    if wake_word and len(wake_word) < 50:  # Sanity check
-                        status['wake_word'] = wake_word
-
-            # Extract tier from "Tier: noisy"
-            if not status['tier'] and 'Tier:' in line:
-                parts = line.split('Tier:')
-                if len(parts) > 1:
-                    tier = parts[1].strip()
-                    # Clean up any extra formatting
-                    tier = tier.split('|')[0].strip()
-                    if tier and len(tier) < 20:  # Sanity check
-                        status['tier'] = tier
 
             # Detect training phases from emoji markers
             if '🧠 TRAIN' in line and status['mode'] == 'unknown':

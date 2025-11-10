@@ -6,6 +6,7 @@ Uses a unified log file that the monitor can always track
 
 import os
 import sys
+import json
 import yaml
 import wave
 import logging
@@ -91,11 +92,32 @@ class WakeWordTrainer:
         self.output_config_path = None
         self.train_script = Path("openwakeword/openwakeword/train.py")
         self.current_phase = None
+        self.state_file = Path("training_state.json")
+        self.state = {
+            'wake_word': None,
+            'tier': None,
+            'phase': None,
+            'progress': None,
+            'model_name': None,
+            'started_at': None,
+            'updated_at': None
+        }
+
+    def update_state(self, **kwargs):
+        """Update state file with current training status"""
+        self.state.update(kwargs)
+        self.state['updated_at'] = datetime.now().isoformat()
+        try:
+            with open(self.state_file, 'w') as f:
+                json.dump(self.state, f, indent=2)
+        except Exception as e:
+            logger.warning(f"Failed to update state file: {e}")
 
     def log_phase(self, phase, message, level=logging.INFO):
-        """Log with phase marker"""
+        """Log with phase marker and update state"""
         self.current_phase = phase
         logger.log(level, message, extra={'phase': phase})
+        self.update_state(phase=phase)
 
     # Training tier configurations
     # Centralized definitions - easy to add new tiers or rename existing ones
@@ -301,6 +323,15 @@ class WakeWordTrainer:
             n_samples: Number of training samples
             tier: Training tier ('basic' or 'noisy')
         """
+
+        # Initialize state
+        self.update_state(
+            wake_word=wake_phrase,
+            tier=tier,
+            model_name=f"{model_name}_{tier}",
+            started_at=datetime.now().isoformat(),
+            phase='initializing'
+        )
 
         self.log_phase('check', "="*70)
         self.log_phase('check', "Wake Word Model Training")
