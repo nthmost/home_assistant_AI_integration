@@ -84,6 +84,58 @@
 - Offer multiple solution options when available (within reason)
 - Present trade-offs clearly
 
+## Voice Assistant Requirements
+
+### Core Constraints
+- **100% LAN-based operation** - No remote API calls during runtime (internet-free after setup)
+- **Custom wakeword detection** - Must work offline once trained
+- **Wakeword training may use remote APIs** - One-time setup process acceptable
+
+### Wakeword Options (in priority order)
+1. **Primary:** "Hey Saga"
+2. **Alternative 1:** "Hey Eris" (if primary doesn't work well)
+3. **Alternative 2:** "Hey Cera" (fallback option)
+
+### Architecture Requirements
+- All speech-to-text (STT) processing on LAN
+- All LLM inference on LAN (using loki.local GPU server)
+- All text-to-speech (TTS) processing on LAN
+- Wakeword detection on LAN
+- Integration with Home Assistant (local API)
+
+### Hardware
+- **Audio Input:** EMEET OfficeCore M0 Plus (Device 2, 16kHz, for wakeword training and runtime voice input)
+- **Audio Output:** EMEET OfficeCore M0 Plus (Device 1, 48kHz, for TTS responses)
+- **Processing:** Mac mini M4 (wakeword detection, STT, TTS orchestration)
+- **LLM Inference:** loki.local (RTX 4080, Ollama with qwen2.5:7b)
+
+## Project Structure
+
+### Voice Assistant (`saga_assistant/`)
+Custom wakeword-based voice assistant for Home Assistant integration.
+
+**Current Status:** Phase 1 - Wakeword Detection (✅ Complete)
+
+**Key Files:**
+- `saga_assistant/README.md` - Main documentation and roadmap
+- `saga_assistant/WAKEWORD_SETUP.md` - Detailed technical setup guide
+- `saga_assistant/demo_audio_devices.py` - Audio device testing tool
+- `saga_assistant/demo_wakeword.py` - Live wakeword detection demo
+- `saga_assistant/models/` - Custom trained models (future)
+
+**Technology Stack:**
+- OpenWakeWord v0.6.0 (wakeword detection)
+- ONNX Runtime (macOS ARM64 inference)
+- sounddevice + pyaudio (audio I/O)
+- Python 3.13 (via pipenv)
+
+**Next Steps:**
+1. Train custom "Hey Saga" model using Google Colab
+2. Implement STT with faster-whisper
+3. Integrate LLM on loki.local
+4. Add TTS with Piper
+5. Connect to Home Assistant API
+
 ---
 
 **Last Updated:** November 2025

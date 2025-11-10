@@ -1,0 +1,5 @@
+#!/bin/bash
+# Wrapper script for training wake words
+cd "$(dirname "$0")"
+source venv/bin/activate
+exec python3 scripts/train_wakeword_integrated.py "$@"

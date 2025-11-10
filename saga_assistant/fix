@@ -1,0 +1,5 @@
+#!/bin/bash
+# Wrapper script for fixing training issues
+cd "$(dirname "$0")"
+source venv/bin/activate
+exec python3 scripts/fix.py "$@"

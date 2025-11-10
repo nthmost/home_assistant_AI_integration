@@ -1,0 +1,5 @@
+#!/bin/bash
+# Wrapper script for monitoring training
+cd "$(dirname "$0")"
+source venv/bin/activate
+exec python3 scripts/monitor_training.py "$@"
