@@ -26,10 +26,11 @@ Saga Assistant is a privacy-focused voice assistant that runs entirely on your l
 
 **All components working:**
 
-1. ✅ **STT (Speech-to-Text)** - faster-whisper base model (~317ms)
+1. ✅ **STT (Speech-to-Text)** - faster-whisper medium model (769M params)
    - Demo: `pipenv run python demo_stt.py`
    - Auto-detects EMEET microphone
-   - Supports 5-second utterances
+   - Dynamic VAD-based recording (no fixed duration!)
+   - Upgraded from base → small → medium for accuracy
 
 2. ✅ **LLM (Language Model)** - qwen2.5:7b on loki.local (~672ms)
    - Demo: `pipenv run python demo_llm.py`
@@ -44,9 +45,10 @@ Saga Assistant is a privacy-focused voice assistant that runs entirely on your l
 
 4. ✅ **Complete Integration** - Full voice assistant working!
    - Run: `pipenv run python run_assistant.py`
-   - **Total latency:** ~1.2-1.3 seconds (well under 2s target!)
+   - **Total latency:** ~4-5 seconds (wakeword → TTS playback)
    - State machine: idle → listening → processing → speaking
-   - **Dynamic VAD:** Records until you stop speaking (no fixed duration!)
+   - **Dynamic VAD:** WebRTC VAD with intelligent auto-stop
+   - **Pre-speech buffering:** 600ms to capture first syllables
 
 ### ✅ Phase 3 Complete: Home Assistant Integration
 
@@ -248,12 +250,15 @@ Make sure scripts use `inference_framework="onnx"` when creating Model instances
 - [x] Natural language intent parsing
 - [x] Voice assistant integration
 
-### Phase 4: Advanced Features ✅ (VAD Complete)
+### ✅ Phase 4 Complete: Advanced Features (VAD)
 - [x] Dynamic VAD for variable-length utterances (WebRTC VAD)
 - [x] Replaced fixed 5s recording with intelligent auto-stop
+- [x] Pre-speech buffering (600ms) to capture first syllables
+- [x] Audio error recovery with retry logic
+- [x] Whisper model upgrade (base → medium) for accuracy
+- [x] Personality tuning for brevity and conversational tone
 - [ ] Intent classification (future)
 - [ ] Context awareness across conversations (future)
-- [ ] Error handling improvements (future)
 
 ### Phase 5: Production Deployment 📋
 - [ ] System service configuration
