@@ -151,10 +151,10 @@ Custom wakeword-based voice assistant for Home Assistant integration.
 When working on long-running or multi-step tasks in this project, create a task status file for monitoring:
 
 ### Status File
-- **Location:** `~/.claude/monitor/home_assistant.json`
+- **Location:** `~/.claude-monitor/home_assistant.json`
 - **Purpose:** Allows external monitoring of Claude Code progress
 - **Monitored by:** `~/claude-monitor/monitor.py`
-- **Note:** All projects deposit breadcrumbs in `~/.claude/monitor/` using project-specific filenames
+- **Note:** All projects deposit breadcrumbs in `~/.claude-monitor/` using project-specific filenames
 
 ### When to Create Status Files
 - Multi-step tasks (3+ steps)
@@ -202,7 +202,28 @@ When working on long-running or multi-step tasks in this project, create a task 
 - Always update when transitioning between states
 - Always update when `needs_attention` becomes `true`
 
-### Python Helper Function
+### For Claude Code: Use Write Tool
+
+**IMPORTANT:** When creating/updating status files, Claude Code should use the **Write tool** directly, NOT Bash with heredocs.
+
+```python
+# Use the Write tool with file_path and JSON content
+# Example:
+Write(
+    file_path="/Users/username/.claude-monitor/home_assistant.json",
+    content=json.dumps({
+        "task_name": "Training Hey Saga Model",
+        "status": "in_progress",
+        "progress_percent": 45,
+        "current_step": "Step 9000/20000",
+        "message": "Training neural network",
+        "needs_attention": False,
+        "updated_at": datetime.now(timezone.utc).isoformat()
+    }, indent=2)
+)
+```
+
+### Python Helper Function (For Scripts)
 
 Add this to training scripts and long-running operations:
 
@@ -218,7 +239,7 @@ def update_task_status(
     current_step: str = None,
     message: str = None,
     needs_attention: bool = False,
-    status_file: Path = Path.home() / '.claude' / 'monitor' / 'home_assistant.json'
+    status_file: Path = Path.home() / '.claude-monitor' / 'home_assistant.json'
 ):
     """Update Claude task monitoring status file."""
     # Ensure directory exists
