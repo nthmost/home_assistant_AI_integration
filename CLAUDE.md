@@ -146,6 +146,136 @@ Custom wakeword-based voice assistant for Home Assistant integration.
 4. Add TTS with Piper
 5. Connect to Home Assistant API
 
+## Task Status Reporting
+
+When working on long-running or multi-step tasks in this project, create a task status file for monitoring:
+
+### Status File
+- **Location:** `~/.claude/monitor/home_assistant.json`
+- **Purpose:** Allows external monitoring of Claude Code progress
+- **Monitored by:** `~/claude-monitor/monitor.py`
+- **Note:** All projects deposit breadcrumbs in `~/.claude/monitor/` using project-specific filenames
+
+### When to Create Status Files
+- Multi-step tasks (3+ steps)
+- Long-running operations (>30 seconds)
+- Tasks that may need user intervention
+- Background processes (training, downloads, builds)
+- Wakeword model training (report progress during 20k+ step training)
+
+### Status File Format
+
+```json
+{
+  "task_name": "Training Hey Saga Wakeword Model",
+  "status": "in_progress",
+  "progress_percent": 45,
+  "current_step": "Step 9000/20000 (45%)",
+  "message": "Training neural network on GPU",
+  "needs_attention": false,
+  "updated_at": "2025-11-10T14:30:00Z"
+}
+```
+
+### Status Values
+- `pending` - Task queued but not started
+- `in_progress` - Currently working on task
+- `blocked` - Waiting for user input or external dependency
+- `waiting` - Paused, will resume automatically
+- `completed` - Task finished successfully
+- `error` - Task failed, needs attention
+
+### Required Fields
+- `task_name` (string): Brief description of the task
+- `status` (string): One of the status values above
+- `updated_at` (string): ISO 8601 timestamp
+
+### Optional Fields
+- `progress_percent` (int): 0-100 completion percentage
+- `current_step` (string): What's happening right now
+- `message` (string): Additional context or status message
+- `needs_attention` (bool): Set to `true` if user action required
+
+### Update Frequency
+- Update the file whenever status changes significantly
+- For long operations (training), update every 5-10 seconds or every 500 steps
+- Always update when transitioning between states
+- Always update when `needs_attention` becomes `true`
+
+### Python Helper Function
+
+Add this to training scripts and long-running operations:
+
+```python
+import json
+from pathlib import Path
+from datetime import datetime, timezone
+
+def update_task_status(
+    task_name: str,
+    status: str,
+    progress_percent: int = None,
+    current_step: str = None,
+    message: str = None,
+    needs_attention: bool = False,
+    status_file: Path = Path.home() / '.claude' / 'monitor' / 'home_assistant.json'
+):
+    """Update Claude task monitoring status file."""
+    # Ensure directory exists
+    status_file.parent.mkdir(parents=True, exist_ok=True)
+
+    data = {
+        'task_name': task_name,
+        'status': status,
+        'updated_at': datetime.now(timezone.utc).isoformat()
+    }
+    if progress_percent is not None:
+        data['progress_percent'] = progress_percent
+    if current_step:
+        data['current_step'] = current_step
+    if message:
+        data['message'] = message
+    if needs_attention:
+        data['needs_attention'] = needs_attention
+
+    with open(status_file, 'w') as f:
+        json.dump(data, f, indent=2)
+```
+
+### Integration with Training Scripts
+
+For training scripts that use tqdm or custom progress tracking:
+
+```python
+# Start of training
+update_task_status(
+    task_name="Training Hey Saga Model",
+    status="in_progress",
+    progress_percent=0,
+    current_step="Loading training data"
+)
+
+# During training (update every 500 steps)
+for step in range(total_steps):
+    # ... training code ...
+    if step % 500 == 0:
+        progress = int((step / total_steps) * 100)
+        update_task_status(
+            task_name="Training Hey Saga Model",
+            status="in_progress",
+            progress_percent=progress,
+            current_step=f"Step {step}/{total_steps}"
+        )
+
+# On completion
+update_task_status(
+    task_name="Training Hey Saga Model",
+    status="completed",
+    progress_percent=100,
+    message="Model saved to models/hey_saga_noisy.onnx"
+)
+```
+
 ---
 
 **Last Updated:** November 2025

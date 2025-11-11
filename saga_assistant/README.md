@@ -46,13 +46,34 @@ Saga Assistant is a privacy-focused voice assistant that runs entirely on your l
    - Run: `pipenv run python run_assistant.py`
    - **Total latency:** ~1.2-1.3 seconds (well under 2s target!)
    - State machine: idle → listening → processing → speaking
+   - **Dynamic VAD:** Records until you stop speaking (no fixed duration!)
 
-### 📋 Phase 3 Next: Home Assistant Integration
+### ✅ Phase 3 Complete: Home Assistant Integration
 
-- REST API connection to Home Assistant
-- Device control commands
-- Status queries
-- Natural language automation
+**All components working:**
+
+1. ✅ **HA Client** - REST API connection (`saga_assistant/ha_client.py`)
+   - Device discovery and control
+   - Entity search and status queries
+   - Proper error handling with custom exceptions
+
+2. ✅ **Intent Parser** - Natural language → HA commands (`saga_assistant/intent_parser.py`)
+   - Action detection (turn_on, turn_off, toggle, status)
+   - Entity type and name parsing
+   - Smart entity resolution with confidence scoring
+   - Demo: `pipenv run python saga_assistant/intent_parser.py`
+
+3. ✅ **Voice Assistant Integration** - HA commands via voice
+   - Fast path for HA commands (no LLM needed!)
+   - Intelligent routing: HA intent → direct execution, else → LLM
+   - Natural spoken responses
+   - Graceful fallback if HA unavailable
+
+**Example Commands:**
+- "Turn on the TV light"
+- "Turn off the aqua lights"
+- "Toggle the power strip"
+- "What's the weather?" (fallback to LLM)
 
 ## Hardware Setup
 
@@ -109,6 +130,9 @@ saga_assistant/
 ├── demo_stt.py                 # Speech-to-text testing (faster-whisper)
 ├── demo_llm.py                 # LLM integration testing (qwen2.5:7b)
 ├── demo_tts.py                 # Text-to-speech testing (Piper)
+├── demo_ha_control.py          # Home Assistant control demo
+├── ha_client.py                # Home Assistant REST API client
+├── intent_parser.py            # Natural language intent parser
 ├── run_assistant.py            # Complete voice assistant
 ├── models/                     # Custom trained models
 │   ├── hey_saga.onnx          # Custom "Hey Saga" model (basic tier)
@@ -217,17 +241,19 @@ Make sure scripts use `inference_framework="onnx"` when creating Model instances
 - [x] Complete integration (run_assistant.py)
 - [x] Total latency optimization (~1.2-1.3s, well under 2s target!)
 
-### Phase 3: Home Assistant Integration 📋
-- [ ] REST API connection
-- [ ] Device control commands
-- [ ] Status queries
-- [ ] Natural language automation
+### Phase 3: Home Assistant Integration ✅
+- [x] REST API connection
+- [x] Device control commands
+- [x] Status queries
+- [x] Natural language intent parsing
+- [x] Voice assistant integration
 
-### Phase 4: Advanced Features 📋
-- [ ] Dynamic VAD for variable-length utterances (Silero or WebRTC)
-- [ ] Intent classification
-- [ ] Context awareness across conversations
-- [ ] Error handling improvements
+### Phase 4: Advanced Features ✅ (VAD Complete)
+- [x] Dynamic VAD for variable-length utterances (WebRTC VAD)
+- [x] Replaced fixed 5s recording with intelligent auto-stop
+- [ ] Intent classification (future)
+- [ ] Context awareness across conversations (future)
+- [ ] Error handling improvements (future)
 
 ### Phase 5: Production Deployment 📋
 - [ ] System service configuration
@@ -247,5 +273,7 @@ Make sure scripts use `inference_framework="onnx"` when creating Model instances
 **Project Started:** 2025-11-09
 **Phase 1 Complete:** 2025-11-09 (Wakeword Detection)
 **Phase 2 Complete:** 2025-11-10 (Full Voice Pipeline)
-**Current Phase:** Phase 3 - Home Assistant Integration
-**Next Milestone:** REST API connection to Home Assistant
+**Phase 3 Complete:** 2025-11-10 (Home Assistant Integration)
+**Phase 4 Complete:** 2025-11-11 (Dynamic VAD with WebRTC)
+**Current Phase:** Phase 5 - Production Deployment (or more Phase 4 features)
+**Next Milestone:** System service / context awareness / intent classification

@@ -106,6 +106,11 @@ def process_audio_stream(stream, oww_model, threshold, cooldown_period, duration
                 )
 
             # Only trigger if score is above threshold and cooldown has passed
+            # Initialize model in tracking dicts if not present
+            if model_name not in last_detection_time:
+                last_detection_time[model_name] = 0
+                detection_count[model_name] = 0
+
             time_since_last = current_time - last_detection_time[model_name]
 
             if score > threshold and time_since_last > cooldown_period:
