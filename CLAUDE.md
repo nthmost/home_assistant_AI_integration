@@ -195,6 +195,7 @@ When working on long-running or multi-step tasks in this project, create a task 
 - `current_step` (string): What's happening right now
 - `message` (string): Additional context or status message
 - `needs_attention` (bool): Set to `true` if user action required
+- `tiny_title` (string): Short title for tiny display mode - when set, ONLY this is shown (not project/task/step) for maximum compactness (e.g., "Training", "Syncing", "Processing")
 
 ### Update Frequency
 - Update the file whenever status changes significantly
