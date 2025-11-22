@@ -146,6 +146,17 @@ Custom wakeword-based voice assistant for Home Assistant integration.
 4. Add TTS with Piper
 5. Connect to Home Assistant API
 
+## Claude Code Permissions
+
+Claude Code has been granted the following permissions for this project:
+
+- **ALWAYS update `~/.claude-monitor/home_assistant.json`** throughout work sessions
+  - Update when starting tasks
+  - Update during progress on multi-step tasks
+  - Update when completing milestones
+  - Update when waiting for user input
+  - Keep the user informed of what's happening at all times
+
 ## Task Status Reporting
 
 When working on long-running or multi-step tasks in this project, create a task status file for monitoring:

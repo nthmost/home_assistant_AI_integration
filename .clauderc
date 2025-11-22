@@ -26,6 +26,13 @@ Read(//**)
 Write(/home/nthmost/projects/git/home_assistant_AI_integration/**)
 Edit(/home/nthmost/projects/git/home_assistant_AI_integration/**)
 
+# Claude monitor status updates
+Read(/Users/nthmost/.claude-monitor/**)
+Write(/Users/nthmost/.claude-monitor/**)
+
+# Temporary files for testing (to avoid heredoc permission prompts)
+Write(/tmp/**)
+
 # SSH to specific hosts
 Bash(ssh nike.local:*)
 Bash(ssh loki.local:*)

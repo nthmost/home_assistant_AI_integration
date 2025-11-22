@@ -3,7 +3,7 @@ Broadlink IR Remote Control Client
 Controls IR devices via Home Assistant Broadlink integration
 """
 
-from ha_client import HomeAssistantClient
+from saga_assistant.ha_client import HomeAssistantClient
 import time
 
 
