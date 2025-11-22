@@ -6,11 +6,14 @@ Integrates wakeword detection, STT, LLM, and TTS into a complete voice assistant
 """
 
 import argparse
+import json
 import logging
+import re
 import sys
 import time
 from pathlib import Path
 from enum import Enum
+from typing import Optional
 
 import numpy as np
 import sounddevice as sd
@@ -26,6 +29,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from saga_assistant.ha_client import HomeAssistantClient
 from saga_assistant.intent_parser import IntentParser, IntentParseError
+from saga_assistant.weather import get_weather, will_it_rain, get_wind_info
+from saga_assistant.timers import TimerManager
 
 # Configure logging
 logging.basicConfig(
@@ -39,17 +44,76 @@ logger = logging.getLogger(__name__)
 EMEET_DEVICE_NAME = "EMEET"
 WAKEWORD_MODEL = "models/hey_saga_noisy.onnx"
 WAKEWORD_THRESHOLD = 0.5
-STT_MODEL = "medium"  # Best balance of accuracy vs speed for voice assistant
+STT_MODEL = "small"  # Best balance of accuracy vs speed (medium was too slow at 3s)
 # VAD parameters (WebRTC VAD for dynamic recording)
 VAD_MODE = 2  # Aggressiveness: 0 (least) to 3 (most). 2 is balanced.
 VAD_FRAME_MS = 30  # Frame duration: 10, 20, or 30ms
-MIN_SPEECH_CHUNKS = 3  # Minimum speech chunks to start recording (~90ms) - reduced to catch first syllable
+MIN_SPEECH_CHUNKS = 2  # Minimum speech chunks to start recording (~60ms) - reduced from 3 to catch first syllable faster
 MIN_SILENCE_CHUNKS = 23  # Silence chunks to stop recording (~700ms)
 MAX_RECORDING_DURATION_S = 10  # Maximum recording duration (safety)
 LLM_BASE_URL = "http://loki.local:11434/v1"
 LLM_MODEL = "qwen2.5:7b"
 TTS_VOICE = "en_GB-semaine-medium"
 SAMPLE_RATE = 16000
+
+def words_to_number(text: str) -> Optional[int]:
+    """Convert number words to integers.
+
+    Args:
+        text: Number as word (e.g., "one", "twenty")
+
+    Returns:
+        Integer or None if not a number word
+    """
+    word_to_num = {
+        "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+        "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+        "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15,
+        "sixteen": 16, "seventeen": 17, "eighteen": 18, "nineteen": 19, "twenty": 20,
+        "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60,
+        "twenty-one": 21, "twenty-two": 22, "twenty-three": 23, "twenty-four": 24, "twenty-five": 25,
+        "twenty-six": 26, "twenty-seven": 27, "twenty-eight": 28, "twenty-nine": 29,
+        "thirty-one": 31, "thirty-two": 32, "forty-five": 45, "ninety": 90,
+    }
+    return word_to_num.get(text.lower())
+
+
+def load_power_phrases(filepath: Path = None) -> dict:
+    """Load power phrases from JSON file.
+
+    Args:
+        filepath: Path to power_phrases.json (defaults to same dir as this script)
+
+    Returns:
+        Dict of regex patterns -> responses
+    """
+    if filepath is None:
+        filepath = Path(__file__).parent / "power_phrases.json"
+
+    # Flatten the JSON structure into pattern -> response dict
+    phrases = {}
+
+    try:
+        with open(filepath) as f:
+            data = json.load(f)
+
+        for category, patterns in data.items():
+            for pattern, response in patterns.items():
+                # Convert pipe-separated pattern to regex with word boundaries
+                regex = r"\b(" + pattern + r")\b"
+                phrases[regex] = response
+
+        logger.info(f"   ✅ Loaded {len(phrases)} power phrases from {filepath.name}")
+
+    except FileNotFoundError:
+        logger.warning(f"   ⚠️  Power phrases file not found: {filepath}")
+        # Fallback to basic greetings
+        phrases = {
+            r"\b(hi|hello|hey)\b": "Hello!",
+            r"\b(thank you|thanks)\b": "You're welcome!",
+        }
+
+    return phrases
 
 
 class AssistantState(Enum):
@@ -68,6 +132,13 @@ class SagaAssistant:
         self.state = AssistantState.IDLE
         self.emeet_input = None
         self.emeet_output = None
+        self.power_phrases = {}
+        self.timer_manager = TimerManager()
+
+        # Conversation state for follow-up questions
+        self.awaiting_followup = False
+        self.followup_type = None
+        self.followup_data = None
 
         logger.info("🚀 Initializing Saga Voice Assistant...")
 
@@ -82,7 +153,27 @@ class SagaAssistant:
         self._init_tts()
         self._init_ha()
 
+        # Load power phrases (must be after logger is configured)
+        logger.info("⚡ Loading power phrases...")
+        self.power_phrases = load_power_phrases()
+
         logger.info("✅ All components initialized successfully!")
+
+    def timer_expired_callback(self, name: str, message: str = None):
+        """Called when a timer expires.
+
+        Args:
+            name: Timer name
+            message: Optional reminder message
+        """
+        if message:
+            # This is a reminder
+            logger.info(f"⏰ Reminder '{name}' expired - announcing: {message}")
+            self.speak(f"Reminder: {message}")
+        else:
+            # This is a timer
+            logger.info(f"⏰ Timer '{name}' expired - announcing")
+            self.speak("Your timer is up!")
 
     def _find_audio_devices(self):
         """Find EMEET audio devices."""
@@ -149,7 +240,7 @@ class SagaAssistant:
             api_key="ollama"
         )
 
-        self.system_prompt = """You are Saga, a helpful and witty voice assistant.
+        self.system_prompt = """You are Saga, a helpful and witty voice assistant in San Francisco (zip 94118).
 
 RESPONSE LENGTH: Keep it SHORT (1-2 sentences max). This is VOICE.
 
@@ -157,6 +248,7 @@ Personality: Helpful first, playful second. Be practical and conversational.
 
 Response rules:
 - HOME AUTOMATION: "Done" or confirm action (4-6 words)
+- WEATHER: You have local weather access, don't ask for location unless they ask about somewhere else
 - REQUESTS (reminders, alarms, etc.): Ask for missing details concisely
   Example: "Remind me tomorrow to X" → "What time?"
 - QUESTIONS: One helpful/interesting sentence, STOP
@@ -190,12 +282,11 @@ Be HELPFUL first, entertaining second. Keep it SHORT."""
         logger.info(f"   ✅ Loaded: {TTS_VOICE}")
 
     def _init_ha(self):
-        """Initialize Home Assistant client."""
+        """Initialize Home Assistant client and intent parser."""
         logger.info("🏠 Connecting to Home Assistant...")
 
         try:
             self.ha_client = HomeAssistantClient()
-            self.intent_parser = IntentParser(self.ha_client)
 
             # Test connection
             if self.ha_client.check_health():
@@ -204,12 +295,75 @@ Be HELPFUL first, entertaining second. Keep it SHORT."""
             else:
                 logger.warning("   ⚠️  Home Assistant connection failed (continuing without HA)")
                 self.ha_client = None
-                self.intent_parser = None
 
         except Exception as e:
             logger.warning(f"   ⚠️  Home Assistant unavailable: {e} (continuing without HA)")
             self.ha_client = None
-            self.intent_parser = None
+
+        # Always init IntentParser (supports parking even without HA)
+        logger.info("🧠 Loading intent parser...")
+        self.intent_parser = IntentParser(self.ha_client)
+        logger.info("   ✅ Intent parser ready (HA + parking support)")
+
+    def play_confirmation_beep(self):
+        """Play a short confirmation beep when wakeword is detected."""
+        # Generate a pleasant two-tone beep (600Hz -> 800Hz)
+        duration = 0.15  # seconds
+        sample_rate = 48000  # EMEET output sample rate
+
+        # First tone (600Hz)
+        t1 = np.linspace(0, duration/2, int(sample_rate * duration/2), False)
+        tone1 = np.sin(600 * 2 * np.pi * t1)
+
+        # Second tone (800Hz)
+        t2 = np.linspace(0, duration/2, int(sample_rate * duration/2), False)
+        tone2 = np.sin(800 * 2 * np.pi * t2)
+
+        # Combine tones
+        beep = np.concatenate([tone1, tone2])
+
+        # Apply fade in/out to avoid clicks
+        fade_samples = int(sample_rate * 0.01)  # 10ms fade
+        beep[:fade_samples] *= np.linspace(0, 1, fade_samples)
+        beep[-fade_samples:] *= np.linspace(1, 0, fade_samples)
+
+        # Scale to reasonable volume (30% max)
+        beep = (beep * 0.3 * 32767).astype(np.int16)
+
+        # Play through EMEET speaker (non-blocking to minimize latency)
+        sd.play(beep, samplerate=sample_rate, device=self.emeet_output)
+        sd.wait()
+        # Removed sleep here - audio device will be released naturally
+
+    def play_question_beep(self):
+        """Play a rising 'question' beep when waiting for follow-up answer."""
+        # Generate a questioning tone (500Hz -> 900Hz) - rising, asking
+        duration = 0.12  # seconds (slightly shorter)
+        sample_rate = 48000  # EMEET output sample rate
+
+        # First tone (500Hz - lower start)
+        t1 = np.linspace(0, duration/2, int(sample_rate * duration/2), False)
+        tone1 = np.sin(500 * 2 * np.pi * t1)
+
+        # Second tone (900Hz - higher end)
+        t2 = np.linspace(0, duration/2, int(sample_rate * duration/2), False)
+        tone2 = np.sin(900 * 2 * np.pi * t2)
+
+        # Combine tones
+        beep = np.concatenate([tone1, tone2])
+
+        # Apply fade in/out to avoid clicks
+        fade_samples = int(sample_rate * 0.01)  # 10ms fade
+        beep[:fade_samples] *= np.linspace(0, 1, fade_samples)
+        beep[-fade_samples:] *= np.linspace(1, 0, fade_samples)
+
+        # Scale to reasonable volume (25% max - slightly softer than confirmation)
+        beep = (beep * 0.25 * 32767).astype(np.int16)
+
+        # Play through EMEET speaker (non-blocking to minimize latency)
+        sd.play(beep, samplerate=sample_rate, device=self.emeet_output)
+        sd.wait()
+        # Removed sleep here - audio device will be released naturally
 
     def listen_for_wakeword(self) -> bool:
         """
@@ -222,6 +376,7 @@ Be HELPFUL first, entertaining second. Keep it SHORT."""
 
         chunk_duration = 1.28  # seconds (wakeword model requirement)
         chunk_samples = int(SAMPLE_RATE * chunk_duration)
+        cooldown_chunks = 3  # Ignore detections for 3 chunks (~4 seconds) after a wake
 
         max_retries = 3
         for attempt in range(max_retries):
@@ -232,6 +387,8 @@ Be HELPFUL first, entertaining second. Keep it SHORT."""
                     samplerate=SAMPLE_RATE,
                     dtype='int16'
                 ) as stream:
+                    cooldown_counter = 0
+
                     while True:
                         # Read audio chunk
                         audio, _ = stream.read(chunk_samples)
@@ -240,10 +397,17 @@ Be HELPFUL first, entertaining second. Keep it SHORT."""
                         # Run wakeword detection
                         prediction = self.wakeword.predict(audio)
 
+                        # Decrement cooldown if active
+                        if cooldown_counter > 0:
+                            cooldown_counter -= 1
+                            continue  # Skip detection during cooldown
+
                         # Check if wakeword detected
                         for model_name, score in prediction.items():
                             if score >= WAKEWORD_THRESHOLD:
                                 logger.info(f"✅ Wakeword detected! (score: {score:.3f})")
+                                self.play_confirmation_beep()
+                                cooldown_counter = cooldown_chunks  # Start cooldown
                                 return True
 
             except KeyboardInterrupt:
@@ -277,7 +441,7 @@ Be HELPFUL first, entertaining second. Keep it SHORT."""
         silence_chunk_count = 0
         is_recording = False
         audio_buffer = []
-        pre_speech_buffer = deque(maxlen=20)  # 600ms of pre-speech audio to catch first syllables
+        pre_speech_buffer = deque(maxlen=50)  # 1.5s of pre-speech audio to catch first syllables (increased from 20)
 
         max_chunks = int(MAX_RECORDING_DURATION_S * 1000 / VAD_FRAME_MS)
         chunk_count = 0
@@ -380,9 +544,119 @@ Be HELPFUL first, entertaining second. Keep it SHORT."""
 
         return text
 
+    def check_power_phrases(self, text: str) -> Optional[str]:
+        """
+        Check if text matches a power phrase for instant response.
+
+        Args:
+            text: User command text
+
+        Returns:
+            Response text if matched, None otherwise
+        """
+        text_lower = text.lower()
+
+        # Special handling for weather queries with locations
+        # "What's the weather in Seattle?" or "What's the weather in Seattle tomorrow?"
+        weather_in_match = re.search(r"what'?s? the weather in ([a-z\s]+?)(?:\s+(today|tomorrow|tonight|this morning|this afternoon))?$", text_lower)
+        if weather_in_match:
+            location = weather_in_match.group(1).strip()
+            when = weather_in_match.group(2) or "now"
+            return get_weather(location=location, when=when)
+
+        # Special handling for timer commands (accept both digits and words)
+        # "Set a timer for 5 minutes" or "Set a timer for five minutes"
+        timer_set_match = re.search(r"(?:set a |)timer for (\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty) (minute|second)s?", text_lower)
+        if timer_set_match:
+            duration_str = timer_set_match.group(1)
+            unit = timer_set_match.group(2)
+
+            # Convert word to number if needed
+            if duration_str.isdigit():
+                duration = int(duration_str)
+            else:
+                duration = words_to_number(duration_str)
+                if duration is None:
+                    duration = 1  # Fallback
+
+            if unit == "minute":
+                return self.timer_manager.set_timer(
+                    duration_minutes=duration,
+                    callback=self.timer_expired_callback
+                )
+            else:
+                return self.timer_manager.set_timer(
+                    duration_seconds=duration,
+                    callback=self.timer_expired_callback
+                )
+
+        # Special handling for reminders (accept both digits and words)
+        # "Remind me in 5 minutes to call mom"
+        reminder_in_match = re.search(r"remind me in (\d+|one|two|three|four|five|six|seven|eight|nine|ten|fifteen|twenty|thirty|forty|fifty|sixty) (minute|second|hour)s? to (.+)", text_lower)
+        if reminder_in_match:
+            duration_str = reminder_in_match.group(1)
+            unit = reminder_in_match.group(2)
+            message = reminder_in_match.group(3).strip()
+
+            # Convert word to number if needed
+            if duration_str.isdigit():
+                duration = int(duration_str)
+            else:
+                duration = words_to_number(duration_str)
+                if duration is None:
+                    duration = 1  # Fallback
+
+            if unit == "hour":
+                duration_minutes = duration * 60
+            elif unit == "minute":
+                duration_minutes = duration
+            else:
+                # seconds
+                return self.timer_manager.set_timer(
+                    duration_seconds=duration,
+                    message=message,
+                    callback=self.timer_expired_callback,
+                    name="reminder"
+                )
+
+            return self.timer_manager.set_timer(
+                duration_minutes=duration_minutes,
+                message=message,
+                callback=self.timer_expired_callback,
+                name="reminder"
+            )
+
+        # "Remind me at 3pm to call mom" - TODO: implement time-based reminders
+        # For now, we'll skip this and let it fall through to LLM
+
+        # Check standard power phrases
+        for pattern, response in self.power_phrases.items():
+            match = re.search(pattern, text_lower, re.IGNORECASE)
+            if match:
+                # Handle special tokens in response
+                if response == "<TIME>":
+                    return time.strftime("It's %I:%M %p")
+                elif response == "<DATE>":
+                    return time.strftime("It's %A, %B %d")
+                elif response.startswith("<WEATHER:"):
+                    when = response[9:-1]  # Extract "now", "today", "tomorrow", etc.
+                    return get_weather(when=when)
+                elif response.startswith("<RAIN:"):
+                    when = response[6:-1]  # Extract "today" or "tomorrow"
+                    return will_it_rain(when=when)
+                elif response == "<WIND>":
+                    return get_wind_info()
+                elif response == "<TIMER:check>":
+                    return self.timer_manager.check_timer()
+                elif response == "<TIMER:cancel>":
+                    return self.timer_manager.cancel_timer()
+                else:
+                    return response
+        return None
+
     def process_command(self, text: str) -> str:
         """
-        Process user command - try HA intent first, fallback to LLM.
+        Process user command - check power phrases, HA intents, then LLM.
 
         Args:
             text: User command text
@@ -392,43 +666,118 @@ Be HELPFUL first, entertaining second. Keep it SHORT."""
         """
         self.state = AssistantState.PROCESSING
 
-        # Try Home Assistant intent parsing first
-        if self.ha_client and self.intent_parser:
+        # Check if we're waiting for a follow-up answer
+        if self.awaiting_followup:
+            logger.info(f"🔄 Processing follow-up answer for: {self.followup_type}")
+            start_time = time.time()
+            result = self.intent_parser.handle_followup(
+                self.followup_type,
+                text,
+                self.followup_data
+            )
+            elapsed = time.time() - start_time
+
+            # Check if the follow-up answer itself needs another follow-up (chained questions)
+            if result.get("status") == "needs_followup":
+                self.followup_type = result.get("followup_type")
+                self.followup_data = result.get("partial_data", {})
+                response_text = result.get("message", "I need more information.")
+                logger.info(f"   💬🚗❓ ({elapsed:.2f}s): \"{response_text}\"")
+                logger.info(f"   ⏸️  Chained follow-up: {self.followup_type}")
+                return response_text
+
+            # Clear followup state (conversation complete)
+            self.awaiting_followup = False
+            self.followup_type = None
+            self.followup_data = None
+
+            response_text = result.get("message", "Done.")
+            logger.info(f"   💬🚗 ({elapsed:.2f}s): \"{response_text}\"")
+            return response_text
+
+        # Check power phrases first (instant, no LLM needed!)
+        start_time = time.time()
+        power_response = self.check_power_phrases(text)
+        if power_response:
+            elapsed = time.time() - start_time
+            logger.info(f"   💬⚡ ({elapsed:.2f}s): \"{power_response}\"")
+            return power_response
+
+        # Try intent parsing (HA + parking) second
+        if self.intent_parser:
             try:
-                logger.info("🏠 Checking for Home Assistant command...")
+                logger.info("🔍 Checking for intent command...")
                 intent = self.intent_parser.parse(text)
 
-                # If confidence is high enough, execute directly
-                if intent.confidence >= 0.4:
+                # Minnie blame queries - always high priority!
+                if intent.action == "minnie_blame":
+                    logger.info(f"   🐱 Minnie blame query detected")
+                    start_time = time.time()
+                    result = self.intent_parser.execute(intent)
+                    elapsed = time.time() - start_time
+                    response_text = result.get("message", "It was Minnie's fault.")
+                    logger.info(f"   💬🐱 ({elapsed:.2f}s): \"{response_text}\"")
+                    return response_text
+
+                # Parking intents don't need entity_id
+                if intent.action in ["save_parking", "where_parked", "when_to_move", "forget_parking"]:
+                    if intent.confidence >= 0.6:
+                        logger.info(f"   🚗 Parking command detected (confidence: {intent.confidence:.2f})")
+                        start_time = time.time()
+                        result = self.intent_parser.execute(intent)
+                        elapsed = time.time() - start_time
+
+                        # Check if we need a follow-up question
+                        if result.get("status") == "needs_followup":
+                            self.awaiting_followup = True
+                            self.followup_type = result.get("followup_type")
+                            self.followup_data = result.get("partial_data")
+                            response_text = result.get("message", "I need more information.")
+                            logger.info(f"   💬🚗❓ ({elapsed:.2f}s): \"{response_text}\"")
+                            logger.info(f"   ⏸️  Waiting for follow-up: {self.followup_type}")
+                            return response_text
+
+                        response_text = result.get("message", "Command executed successfully.")
+                        logger.info(f"   💬🚗 ({elapsed:.2f}s): \"{response_text}\"")
+                        return response_text
+                    else:
+                        logger.info(f"   ⚠️  Low confidence ({intent.confidence:.2f}), using LLM")
+
+                # HA intents need entity_id
+                elif intent.confidence >= 0.6 and intent.entity_id:
                     logger.info(f"   ✅ HA command detected (confidence: {intent.confidence:.2f})")
+                    start_time = time.time()
                     result = self.intent_parser.execute(intent)
 
                     # Get friendly name for response
-                    if intent.entity_id:
-                        entity = self.ha_client.get_state(intent.entity_id)
-                        friendly_name = entity.get("attributes", {}).get(
-                            "friendly_name", intent.entity_id
-                        )
+                    entity = self.ha_client.get_state(intent.entity_id)
+                    friendly_name = entity.get("attributes", {}).get(
+                        "friendly_name", intent.entity_id
+                    )
 
-                        if intent.action == "turn_on":
-                            return f"Okay, I've turned on the {friendly_name}."
-                        elif intent.action == "turn_off":
-                            return f"Okay, I've turned off the {friendly_name}."
-                        elif intent.action == "toggle":
-                            return f"Okay, I've toggled the {friendly_name}."
-                        elif intent.action == "status":
-                            state = entity["state"]
-                            return f"The {friendly_name} is {state}."
+                    if intent.action == "turn_on":
+                        response_text = f"Okay, I've turned on the {friendly_name}."
+                    elif intent.action == "turn_off":
+                        response_text = f"Okay, I've turned off the {friendly_name}."
+                    elif intent.action == "toggle":
+                        response_text = f"Okay, I've toggled the {friendly_name}."
+                    elif intent.action == "status":
+                        state = entity["state"]
+                        response_text = f"The {friendly_name} is {state}."
+                    else:
+                        response_text = result.get("message", "Command executed successfully.")
 
-                    return result.get("message", "Command executed successfully.")
+                    elapsed = time.time() - start_time
+                    logger.info(f"   💬🏠 ({elapsed:.2f}s): \"{response_text}\"")
+                    return response_text
 
                 else:
                     logger.info(f"   ⚠️  Low confidence ({intent.confidence:.2f}), using LLM")
 
             except IntentParseError as e:
-                logger.info(f"   ℹ️  Not a HA command: {e}")
+                logger.info(f"   ℹ️  Not an intent command: {e}")
             except Exception as e:
-                logger.warning(f"   ⚠️  HA command failed: {e}")
+                logger.warning(f"   ⚠️  Intent command failed: {e}")
 
         # Fallback to LLM for conversational queries
         return self.generate_response(text)
@@ -444,6 +793,7 @@ Be HELPFUL first, entertaining second. Keep it SHORT."""
             LLM response text
         """
         logger.info("🤖 Generating response...")
+        start_time = time.time()
 
         try:
             response = self.llm.chat.completions.create(
@@ -452,12 +802,13 @@ Be HELPFUL first, entertaining second. Keep it SHORT."""
                     {"role": "system", "content": self.system_prompt},
                     {"role": "user", "content": prompt}
                 ],
-                max_tokens=50,  # Force brevity - this is voice, not text chat!
+                max_tokens=30,  # Aggressive brevity for speed - voice needs to be snappy!
                 temperature=0.8
             )
 
+            elapsed = time.time() - start_time
             response_text = response.choices[0].message.content.strip()
-            logger.info(f"   💬 Response: \"{response_text}\"")
+            logger.info(f"   💬🤖 ({elapsed:.2f}s): \"{response_text}\"")
 
             return response_text
 
@@ -493,6 +844,14 @@ Be HELPFUL first, entertaining second. Keep it SHORT."""
 
             logger.info("   ✅ Speech complete")
 
+            # Add cooldown to prevent TTS from triggering wakeword + ensure device is released
+            # TTS echoes can sound similar to "Hey Saga"
+            # BUT: Skip cooldown if we're waiting for follow-up (no wakeword detection)
+            if not self.awaiting_followup:
+                time.sleep(1.2)  # 1.2 second cooldown (extra 0.2s for device release)
+            else:
+                time.sleep(0.2)  # Just enough to release audio device
+
     def run(self):
         """Main assistant loop."""
         logger.info("\n" + "="*60)
@@ -506,11 +865,17 @@ Be HELPFUL first, entertaining second. Keep it SHORT."""
                 # Reset to idle
                 self.state = AssistantState.IDLE
 
-                # Wait for wakeword
-                if not self.listen_for_wakeword():
-                    break
+                # If we're waiting for a follow-up, skip wakeword and listen immediately
+                if self.awaiting_followup:
+                    logger.info("⏩ Listening for follow-up answer (no wakeword needed)...")
+                    # Play question beep to signal we're ready for answer
+                    self.play_question_beep()
+                else:
+                    # Wait for wakeword
+                    if not self.listen_for_wakeword():
+                        break
 
-                # Record command
+                # Record command (or follow-up answer)
                 audio = self.record_command()
 
                 # Transcribe
@@ -518,6 +883,12 @@ Be HELPFUL first, entertaining second. Keep it SHORT."""
 
                 if not text:
                     logger.warning("No command detected, returning to idle")
+                    # Clear follow-up state if we were waiting
+                    if self.awaiting_followup:
+                        logger.warning("   Clearing follow-up state due to no input")
+                        self.awaiting_followup = False
+                        self.followup_type = None
+                        self.followup_data = None
                     continue
 
                 # Process command (HA intent or LLM)
@@ -526,8 +897,9 @@ Be HELPFUL first, entertaining second. Keep it SHORT."""
                 # Speak response
                 self.speak(response)
 
-                # Small pause before listening again
-                time.sleep(1)
+                # Small pause before listening again (skip if awaiting follow-up for faster response)
+                if not self.awaiting_followup:
+                    time.sleep(1)
 
         except KeyboardInterrupt:
             logger.info("\n\n⏹️  Saga Voice Assistant stopped")

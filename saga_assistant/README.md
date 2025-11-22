@@ -2,6 +2,17 @@
 
 A LAN-only voice assistant with custom wakeword detection for Home Assistant integration.
 
+## Recent Updates (Latest Session)
+
+**2025-11-18**: Phase 4 Complete - Power Phrases & Utilities
+- ✅ Weather integration (wttr.in API with voice-optimized responses)
+- ✅ Timer system with word number support ("five minutes", "twenty seconds")
+- ✅ Reminder system with verbose announcements
+- ✅ Wakeword bounce prevention (3-chunk cooldown)
+- ✅ Fixed audio device conflicts with timing delays
+- ✅ Compass direction conversion for wind (WNW → "west northwest")
+- ✅ Rain forecast voice optimization (simplified multi-period responses)
+
 ## Overview
 
 Saga Assistant is a privacy-focused voice assistant that runs entirely on your local network with no cloud dependencies during runtime. It uses OpenWakeWord for custom wakeword detection with "Hey Saga" as the primary wake phrase.
@@ -11,7 +22,8 @@ Saga Assistant is a privacy-focused voice assistant that runs entirely on your l
 - ✅ **100% LAN-based operation** - No internet required after initial setup
 - ✅ **Custom wakeword** - "Hey Saga" trained with noisy tier
 - ✅ **Complete voice pipeline** - Wake word → STT → LLM → TTS
-- 🔄 **Home Assistant integration** - Control smart home with voice commands (planned)
+- ✅ **Home Assistant integration** - Control smart home with voice commands
+- ✅ **Power phrases** - Instant responses for common queries (weather, time, timers)
 
 ## Current Status
 
@@ -77,6 +89,48 @@ Saga Assistant is a privacy-focused voice assistant that runs entirely on your l
 - "Toggle the power strip"
 - "What's the weather?" (fallback to LLM)
 
+### ✅ Phase 4 Complete: Power Phrases & Utilities
+
+**Power Phrases System** - Instant responses without LLM processing (`saga_assistant/power_phrases.json`)
+
+1. ✅ **Greetings & Social**
+   - "Hi", "Hello", "Hey"
+   - "Thank you", "Thanks"
+   - "Good morning", "Good night"
+
+2. ✅ **Time & Date**
+   - "What time is it?"
+   - "What's the date?"
+
+3. ✅ **Weather Integration** (`saga_assistant/weather.py`)
+   - Current: "What's the weather?", "How's the weather?"
+   - Time-based: "What's the weather this morning/afternoon/tonight?"
+   - Forecast: "What's the weather tomorrow?"
+   - Rain: "Will it rain today/tomorrow?", "Is it going to rain?"
+   - Wind: "How windy is it?", "Is there much wind?"
+   - Uses wttr.in API (San Francisco, zip 94118)
+   - Voice-optimized responses (compass directions spelled out, simplified rain forecasts)
+
+4. ✅ **Timers & Reminders** (`saga_assistant/timers.py`)
+   - Set: "Set a timer for 5 minutes", "Timer for 30 seconds"
+   - Check: "How much time is left?", "Check the timer"
+   - Cancel: "Cancel the timer", "Stop the timer"
+   - Reminders: "Remind me in 20 minutes to check the laundry"
+   - **Supports word numbers**: "one", "five", "twenty", etc.
+   - **Background threading**: Timers run independently, announce when complete
+   - **Verbose reminders**: Announces full reminder message on expiration
+
+5. ✅ **Wakeword Bounce Prevention**
+   - 3-chunk cooldown (~4 seconds) prevents duplicate detections
+   - Eliminates false triggers from audio buffer overlap
+
+**Example Commands:**
+- "What time is it?" → instant response
+- "What's the weather tomorrow?" → wttr.in forecast
+- "Is it going to rain today?" → precipitation check
+- "Set a timer for five minutes" → background timer with announcement
+- "Remind me in twenty minutes to take out the trash" → verbose reminder
+
 ## Hardware Setup
 
 ### Audio Devices
@@ -88,6 +142,28 @@ Saga Assistant is a privacy-focused voice assistant that runs entirely on your l
 - **LLM Inference:** loki.local (AMD Ryzen 7 2700X, RTX 4080 16GB, 62GB RAM)
 
 ## Quick Start
+
+### Run the Full Voice Assistant
+
+```bash
+pipenv run python saga_assistant/run_assistant.py
+```
+
+This starts the complete voice assistant with all features:
+- Wakeword detection ("Hey Saga")
+- Speech-to-text (faster-whisper)
+- Power phrases (weather, timers, greetings)
+- Home Assistant control
+- LLM responses (qwen2.5:7b on loki.local)
+- Text-to-speech (Piper)
+
+**Try these commands:**
+- "Hey Saga" → "What's the weather?"
+- "Hey Saga" → "Set a timer for five minutes"
+- "Hey Saga" → "Remind me in twenty minutes to check the laundry"
+- "Hey Saga" → "Turn on the TV light"
+- "Hey Saga" → "What time is it?"
+- "Hey Saga" → "Will it rain today?"
 
 ### Test Audio Devices
 
@@ -101,7 +177,7 @@ This will:
 - Test playback to EMEET speaker
 - Save a test recording
 
-### Run Wakeword Detection
+### Run Wakeword Detection Only
 
 ```bash
 pipenv run python saga_assistant/demo_wakeword.py
@@ -135,7 +211,10 @@ saga_assistant/
 ├── demo_ha_control.py          # Home Assistant control demo
 ├── ha_client.py                # Home Assistant REST API client
 ├── intent_parser.py            # Natural language intent parser
-├── run_assistant.py            # Complete voice assistant
+├── run_assistant.py            # ⭐ Complete voice assistant (main entry point)
+├── power_phrases.json          # Power phrase patterns for instant responses
+├── weather.py                  # Weather integration (wttr.in API)
+├── timers.py                   # Timer and reminder system
 ├── models/                     # Custom trained models
 │   ├── hey_saga.onnx          # Custom "Hey Saga" model (basic tier)
 │   └── hey_saga_noisy.onnx    # Custom "Hey Saga" model (noisy tier, default)
@@ -273,12 +352,40 @@ Make sure scripts use `inference_framework="onnx"` when creating Model instances
 - **WAKEWORD_SETUP.md:** Detailed technical setup guide
 - **Project CLAUDE.md:** Voice assistant requirements and architecture
 
+## Next Steps (Potential Enhancements)
+
+**More Power Phrases:**
+- "Turn on/off all the lights"
+- Scene triggers ("Good morning", "Goodnight", "Movie mode")
+- Music/media control ("Pause", "Volume up/down")
+- Utilities ("Flip a coin", "Roll a die", "Tell me a joke")
+- Shopping lists ("Add X to my shopping list")
+
+**Timer/Reminder Enhancements:**
+- Absolute time reminders: "Remind me at 3pm to call mom"
+- Named timers: "Set a 5 minute timer called pizza"
+- Multiple simultaneous timers
+- Timer persistence across restarts
+
+**Home Assistant Improvements:**
+- Scene activation ("Movie mode", "Bedtime")
+- Climate control ("Set temperature to 72")
+- Device groups ("Turn on all the lights")
+- Status queries ("What's the temperature?")
+
+**Advanced Features:**
+- Context awareness across conversations
+- User preferences and personalization
+- Multi-user support (voice recognition)
+- System service for auto-start
+- Web dashboard for monitoring
+
 ---
 
 **Project Started:** 2025-11-09
 **Phase 1 Complete:** 2025-11-09 (Wakeword Detection)
 **Phase 2 Complete:** 2025-11-10 (Full Voice Pipeline)
 **Phase 3 Complete:** 2025-11-10 (Home Assistant Integration)
-**Phase 4 Complete:** 2025-11-11 (Dynamic VAD with WebRTC)
-**Current Phase:** Phase 5 - Production Deployment (or more Phase 4 features)
-**Next Milestone:** System service / context awareness / intent classification
+**Phase 4 Complete:** 2025-11-18 (Power Phrases, Weather, Timers, Reminders)
+**Current Status:** ✅ Fully Functional Voice Assistant
+**Ready for:** Daily use, additional power phrases, production deployment

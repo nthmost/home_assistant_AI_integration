@@ -17,11 +17,12 @@ logger = logging.getLogger(__name__)
 @dataclass
 class Intent:
     """Parsed intent from natural language."""
-    action: str  # "turn_on", "turn_off", "toggle", "status"
+    action: str  # "turn_on", "turn_off", "toggle", "status", "save_parking", etc.
     entity_type: Optional[str] = None  # "light", "switch", etc.
     entity_name: Optional[str] = None  # "tv", "aqua", etc.
     entity_id: Optional[str] = None  # Full entity_id if resolved
     confidence: float = 0.0  # 0.0-1.0 confidence score
+    data: Optional[Dict[str, Any]] = None  # Extra data (e.g., parking location)
 
 
 class IntentParseError(Exception):
@@ -34,6 +35,13 @@ class IntentParser:
 
     # Action patterns
     ACTION_PATTERNS = {
+        # Minnie blame (check FIRST before other actions)
+        "minnie_blame": [
+            r"\b(who'?s fault|whose fault|who is to blame|who did this|who'?s to blame|who made this mess|what happened|who broke|who kicked|why is there|who was yodeling|who'?s running|who should we blame|who do we blame)\b",
+            r"\b(was it minnie|is it minnie|did minnie|is this minnie|blame minnie)\b",
+            r"\b(what did minnie do|what did many do)\b",  # "many" is common STT error for "Minnie"
+            r"\b(minnie'?s fault)\b",
+        ],
         "turn_on": [
             r"\b(turn on|switch on|enable|activate)\b",
             r"\b(open)\b",  # For covers/blinds
@@ -46,12 +54,38 @@ class IntentParser:
             r"\b(toggle|flip|switch)\b",
         ],
         "status": [
-            r"\b(status|state|is|are)\b.*\b(on|off)\b",
-            r"\b(check|what'?s|what is)\b",
+            r"\b(status|state|is|are)\b.*\b(on|off|open|closed)\b",
+            r"\b(check|what'?s|what is)\b.*(light|switch|fan|lock|cover|device|status|temperature|humidity)",
         ],
         "brightness": [
             r"\b(brightness|dim|brighten)\b",
             r"\b(set|make).*(brighter|dimmer|darker)\b",
+        ],
+        # Parking actions (order matters!)
+        # Check specific patterns BEFORE general ones to avoid false matches
+        "where_parked": [
+            r"\b(where (did i park|is my car|is the car|did i leave|is my vehicle|did i move my car))\b",
+            r"\b(where'?s my car|where am i parked)\b",
+            r"\b(remind me where|tell me where).+(parked|car)\b",
+        ],
+        "forget_parking": [
+            # Must come BEFORE save_parking (contains "parked" which would match save_parking)
+            r"\b(forget where i parked|forget my (car|parking))\b",
+            r"\b(clear (my )?(parking|car location))\b",
+            r"\b(delete (my )?(parking|car) (location|spot))\b",
+            r"\b(i moved (my|the) car)\b",
+            r"\b(reset parking)\b",
+        ],
+        "save_parking": [
+            r"\b(i parked|my car is|car is parked|i'm parked|i just parked)\b",
+            r"\b(i left (my|the) car)\b",
+        ],
+        "when_to_move": [
+            r"\b(when (do i need to |should i |do i have to )?move (my car|the car|my vehicle))\b",
+            r"\b(do i need to move)\b",
+            r"\b(street sweeping|when is street sweeping|is there street sweeping)\b",
+            r"\b(when (is|do i have) street cleaning)\b",
+            r"\b(any (street sweeping|parking restrictions))\b",
         ],
     }
 
@@ -73,14 +107,37 @@ class IntentParser:
         "tube": ["tube", "tube lamp"],
     }
 
-    def __init__(self, ha_client: HomeAssistantClient):
+    def __init__(self, ha_client: Optional[HomeAssistantClient]):
         """Initialize the intent parser.
 
         Args:
-            ha_client: Home Assistant client for entity lookup
+            ha_client: Home Assistant client for entity lookup (None if HA unavailable)
         """
         self.ha_client = ha_client
         self._entity_cache = None
+
+        # Lazy init parking manager
+        self._parking_manager = None
+
+        # Lazy init Minnie model
+        self._minnie_model = None
+
+    @property
+    def parking_manager(self):
+        """Lazy-load parking manager"""
+        if self._parking_manager is None:
+            from saga_assistant.parking import StreetSweepingLookup, ParkingManager
+            lookup = StreetSweepingLookup()
+            self._parking_manager = ParkingManager(lookup)
+        return self._parking_manager
+
+    @property
+    def minnie_model(self):
+        """Lazy-load Minnie model"""
+        if self._minnie_model is None:
+            from saga_assistant.minnie_model import MinnieModel
+            self._minnie_model = MinnieModel()
+        return self._minnie_model
 
     def parse(self, text: str) -> Intent:
         """Parse natural language text into an intent.
@@ -102,7 +159,19 @@ class IntentParser:
         if not action:
             raise IntentParseError(f"Could not determine action from: {text}")
 
-        # Parse entity type and name
+        # Handle Minnie blame queries specially
+        if action == "minnie_blame":
+            return Intent(
+                action="minnie_blame",
+                confidence=1.0,  # Always high confidence for Minnie!
+                data={"question": text}
+            )
+
+        # Handle parking actions specially
+        if action in ["save_parking", "where_parked", "when_to_move"]:
+            return self._parse_parking_intent(action, text)
+
+        # Parse entity type and name for HA actions
         entity_type = self._parse_entity_type(text)
         entity_name = self._parse_entity_name(text)
 
@@ -196,6 +265,10 @@ class IntentParser:
         Returns:
             Tuple of (entity_id, confidence)
         """
+        # Can't resolve entities without HA client
+        if not self.ha_client:
+            return None, 0.0
+
         # Get all entities (use cache)
         if self._entity_cache is None:
             self._entity_cache = self.ha_client.get_states()
@@ -256,6 +329,48 @@ class IntentParser:
 
         return None, 0.0
 
+    def _parse_parking_intent(self, action: str, text: str) -> Intent:
+        """Parse parking-specific intents
+
+        Args:
+            action: Parking action (save_parking, where_parked, when_to_move)
+            text: Original text
+
+        Returns:
+            Parking Intent
+        """
+        data = {}
+        confidence = 0.9  # High confidence for parking actions
+
+        if action == "save_parking":
+            # Extract location from text
+            # Look for patterns like "I parked on X" or "my car is at Y"
+            location_patterns = [
+                r"(?:i parked|my car is|car is parked|i'?m parked|parked)\s+(?:on |at |in )?(?:the )?(.+)",
+            ]
+
+            location_text = None
+            for pattern in location_patterns:
+                match = re.search(pattern, text, re.IGNORECASE)
+                if match:
+                    location_text = match.group(1).strip()
+                    break
+
+            if location_text:
+                data['location_text'] = location_text
+                logger.info(f"Parsed parking location: {location_text}")
+            else:
+                confidence = 0.4
+                logger.warning(f"Could not extract location from: {text}")
+
+        logger.info(f"Parsed parking intent: action={action}, confidence={confidence:.2f}")
+
+        return Intent(
+            action=action,
+            confidence=confidence,
+            data=data
+        )
+
     def execute(self, intent: Intent) -> Dict[str, Any]:
         """Execute an intent.
 
@@ -268,39 +383,375 @@ class IntentParser:
         Raises:
             IntentParseError: If intent cannot be executed
         """
+        # Handle Minnie blame queries
+        if intent.action == "minnie_blame":
+            question = intent.data.get("question", "Whose fault is it?")
+            response = self.minnie_model.blame_minnie(question)
+            return {
+                "status": "success",
+                "message": response
+            }
+
+        # Handle parking actions
+        if intent.action == "save_parking":
+            location_text = intent.data.get('location_text')
+            if not location_text:
+                return {
+                    "status": "error",
+                    "message": "I didn't understand where you parked. Try saying 'I parked on Valencia between 18th and 19th'"
+                }
+
+            # Parse location
+            location = self.parking_manager.parser.parse(location_text)
+            if not location:
+                return {
+                    "status": "error",
+                    "message": f"I couldn't find that street. Could you say it again?"
+                }
+
+            # Check for missing side information (critical for accurate schedule)
+            if location.side == "Unknown":
+                # Get valid sides for this street/block
+                valid_sides = self.parking_manager.lookup.get_valid_sides(
+                    location.street,
+                    location.block_limits
+                )
+
+                # Build question based on valid sides
+                if len(valid_sides) == 2:
+                    sides_str = f"{valid_sides[0].lower()} or {valid_sides[1].lower()}"
+                elif len(valid_sides) > 2:
+                    sides_str = ", ".join([s.lower() for s in valid_sides[:-1]]) + f", or {valid_sides[-1].lower()}"
+                else:
+                    # Fallback to all four if we can't determine
+                    sides_str = "north, south, east, or west"
+
+                return {
+                    "status": "needs_followup",
+                    "followup_type": "parking_side",
+                    "partial_data": {"location": location, "valid_sides": valid_sides},
+                    "message": f"Which side of the street - {sides_str}?"
+                }
+
+            # Save location
+            self.parking_manager.save_parking_location(location)
+
+            # Expand abbreviations for TTS
+            from saga_assistant.parking import expand_street_abbreviations
+            street_spoken = expand_street_abbreviations(location.street)
+
+            return {
+                "status": "success",
+                "message": f"Got it. You're parked on {street_spoken}. I'll remind you about street sweeping."
+            }
+
+        elif intent.action == "where_parked":
+            # Check if we have parking location saved
+            state = self.parking_manager.load_parking_state()
+            if not state:
+                return {
+                    "status": "needs_followup",
+                    "followup_type": "no_parking_saved",
+                    "message": "I don't know where you parked. Where is your car?"
+                }
+
+            # Check if we have critical information (side)
+            location_data = state.get('location', {})
+            if location_data.get('side') == "Unknown":
+                # Get valid sides for this street/block
+                valid_sides = self.parking_manager.lookup.get_valid_sides(
+                    location_data.get('street'),
+                    location_data.get('block_limits')
+                )
+
+                # Build question based on valid sides
+                if len(valid_sides) == 2:
+                    sides_str = f"{valid_sides[0].lower()} or {valid_sides[1].lower()}"
+                elif len(valid_sides) > 2:
+                    sides_str = ", ".join([s.lower() for s in valid_sides[:-1]]) + f", or {valid_sides[-1].lower()}"
+                else:
+                    sides_str = "north, south, east, or west"
+
+                return {
+                    "status": "needs_followup",
+                    "followup_type": "parking_side",
+                    "partial_data": {"location": location_data, "valid_sides": valid_sides},
+                    "message": f"I know you're parked, but which side - {sides_str}?"
+                }
+
+            status = self.parking_manager.get_human_readable_status(expand_abbreviations=True)
+            return {
+                "status": "success",
+                "message": status
+            }
+
+        elif intent.action == "forget_parking":
+            # Clear saved parking location
+            state = self.parking_manager.load_parking_state()
+            if not state:
+                return {
+                    "status": "success",
+                    "message": "I don't have any parking location saved."
+                }
+
+            # Delete the state file
+            self.parking_manager.state_file.unlink(missing_ok=True)
+
+            return {
+                "status": "success",
+                "message": "Okay, I've forgotten where you parked."
+            }
+
+        elif intent.action == "when_to_move":
+            # Check if we have parking location saved
+            state = self.parking_manager.load_parking_state()
+            if not state:
+                return {
+                    "status": "needs_followup",
+                    "followup_type": "no_parking_saved",
+                    "message": "I don't know where you parked. Tell me where your car is first."
+                }
+
+            # Check if we have critical information (side) BEFORE looking up schedule
+            location_data = state.get('location', {})
+            if location_data.get('side') == "Unknown":
+                # Get valid sides for this street/block
+                valid_sides = self.parking_manager.lookup.get_valid_sides(
+                    location_data.get('street'),
+                    location_data.get('block_limits')
+                )
+
+                # Build question based on valid sides
+                if len(valid_sides) == 2:
+                    sides_str = f"{valid_sides[0].lower()} or {valid_sides[1].lower()}"
+                elif len(valid_sides) > 2:
+                    sides_str = ", ".join([s.lower() for s in valid_sides[:-1]]) + f", or {valid_sides[-1].lower()}"
+                else:
+                    sides_str = "north, south, east, or west"
+
+                return {
+                    "status": "needs_followup",
+                    "followup_type": "parking_side_for_schedule",
+                    "partial_data": {"location": location_data, "valid_sides": valid_sides},
+                    "message": f"I need to know which side you're parked on - {sides_str}?"
+                }
+
+            next_sweep = self.parking_manager.get_next_sweeping(days_ahead=14)
+            if not next_sweep:
+                return {
+                    "status": "success",
+                    "message": "No street sweeping scheduled in the next 2 weeks."
+                }
+
+            schedule = next_sweep['schedule']
+            start_time = next_sweep['start_time']
+            from datetime import datetime
+            delta = start_time - datetime.now()
+
+            if delta.days == 0:
+                when = "today"
+            elif delta.days == 1:
+                when = "tomorrow"
+            else:
+                # Use ordinal for day (December 2nd, not December 2)
+                from saga_assistant.parking import ordinal
+                when = start_time.strftime('%A, %B ') + ordinal(start_time.day)
+
+            from_hour = schedule.fromhour % 12 or 12
+            from_period = 'AM' if schedule.fromhour < 12 else 'PM'
+            to_hour = schedule.tohour % 12 or 12
+            to_period = 'AM' if schedule.tohour < 12 else 'PM'
+
+            message = f"Street sweeping is {when} from {from_hour} {from_period} to {to_hour} {from_period}."
+
+            if delta.total_seconds() / 3600 < 24:
+                message += " Make sure to move your car!"
+
+            return {
+                "status": "success",
+                "message": message
+            }
+
+        # Handle Home Assistant actions
         if not intent.entity_id:
             raise IntentParseError(
                 f"Cannot execute intent: no entity found for "
                 f"type={intent.entity_type} name={intent.entity_name}"
             )
 
-        try:
-            if intent.action == "turn_on":
-                self.ha_client.turn_on(intent.entity_id)
-                return {"status": "success", "message": f"Turned on {intent.entity_id}"}
+        if intent.action == "turn_on":
+            self.ha_client.turn_on(intent.entity_id)
+            return {"status": "success", "message": f"Turned on {intent.entity_id}"}
 
-            elif intent.action == "turn_off":
-                self.ha_client.turn_off(intent.entity_id)
-                return {"status": "success", "message": f"Turned off {intent.entity_id}"}
+        elif intent.action == "turn_off":
+            self.ha_client.turn_off(intent.entity_id)
+            return {"status": "success", "message": f"Turned off {intent.entity_id}"}
 
-            elif intent.action == "toggle":
-                self.ha_client.toggle(intent.entity_id)
-                return {"status": "success", "message": f"Toggled {intent.entity_id}"}
+        elif intent.action == "toggle":
+            self.ha_client.toggle(intent.entity_id)
+            return {"status": "success", "message": f"Toggled {intent.entity_id}"}
 
-            elif intent.action == "status":
-                state = self.ha_client.get_state(intent.entity_id)
+        elif intent.action == "status":
+            state = self.ha_client.get_state(intent.entity_id)
+            return {
+                "status": "success",
+                "message": f"{intent.entity_id} is {state['state']}",
+                "state": state,
+            }
+
+        else:
+            raise IntentParseError(f"Unsupported action: {intent.action}")
+
+    def handle_followup(self, followup_type: str, answer_text: str, partial_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle a follow-up answer to complete a previous intent.
+
+        Args:
+            followup_type: Type of follow-up (e.g., "parking_side")
+            answer_text: User's answer text
+            partial_data: Partial data from previous interaction
+
+        Returns:
+            Result dictionary
+        """
+        # Parse side from answer (common to multiple follow-up types)
+        def parse_side(text: str) -> Optional[str]:
+            text_lower = text.lower().strip()
+            if "north" in text_lower:
+                return "North"
+            elif "south" in text_lower:
+                return "South"
+            elif "east" in text_lower:
+                return "East"
+            elif "west" in text_lower:
+                return "West"
+            return None
+
+        if followup_type == "parking_side":
+            # Initial save - user just told us where they parked, missing side
+            side = parse_side(answer_text)
+            if not side:
                 return {
-                    "status": "success",
-                    "message": f"{intent.entity_id} is {state['state']}",
-                    "state": state,
+                    "status": "error",
+                    "message": "I didn't catch that. Is it north, south, east, or west?"
                 }
 
-            else:
-                raise IntentParseError(f"Unsupported action: {intent.action}")
+            # Update location with side
+            from saga_assistant.parking import ParkingLocation
+            location_dict = partial_data["location"]
+            location = ParkingLocation(**location_dict) if isinstance(location_dict, dict) else location_dict
+            location.side = side
 
-        except Exception as e:
-            logger.exception(f"Failed to execute intent: {e}")
-            raise IntentParseError(f"Failed to execute: {e}")
+            # Now save the complete location
+            self.parking_manager.save_parking_location(location)
+
+            # Expand abbreviations for TTS
+            from saga_assistant.parking import expand_street_abbreviations
+            street_spoken = expand_street_abbreviations(location.street)
+
+            return {
+                "status": "success",
+                "message": f"Got it. You're parked on {street_spoken}. I'll remind you about street sweeping."
+            }
+
+        elif followup_type == "parking_side_for_schedule":
+            # User asked "when do I move?" but we had incomplete info
+            side = parse_side(answer_text)
+            if not side:
+                return {
+                    "status": "error",
+                    "message": "I didn't catch that. Is it north, south, east, or west?"
+                }
+
+            # Load current state, update side, re-save
+            state = self.parking_manager.load_parking_state()
+            if not state:
+                return {
+                    "status": "error",
+                    "message": "I lost track of where you parked. Could you tell me again?"
+                }
+
+            # Update location in state
+            from saga_assistant.parking import ParkingLocation
+            location_dict = state['location']
+            location = ParkingLocation(**location_dict)
+            location.side = side
+
+            # Re-save with updated side
+            self.parking_manager.save_parking_location(location)
+
+            # Now answer the original question: when do I move?
+            next_sweep = self.parking_manager.get_next_sweeping(days_ahead=14)
+            if not next_sweep:
+                return {
+                    "status": "success",
+                    "message": "No street sweeping scheduled in the next 2 weeks."
+                }
+
+            schedule = next_sweep['schedule']
+            start_time = next_sweep['start_time']
+            from datetime import datetime
+            from saga_assistant.parking import ordinal
+            delta = start_time - datetime.now()
+
+            if delta.days == 0:
+                when = "today"
+            elif delta.days == 1:
+                when = "tomorrow"
+            else:
+                when = start_time.strftime('%A, %B ') + ordinal(start_time.day)
+
+            from_hour = schedule.fromhour % 12 or 12
+            from_period = 'AM' if schedule.fromhour < 12 else 'PM'
+            to_hour = schedule.tohour % 12 or 12
+            to_period = 'AM' if schedule.tohour < 12 else 'PM'
+
+            message = f"Street sweeping is {when} from {from_hour} {from_period} to {to_hour} {from_period}."
+
+            if delta.total_seconds() / 3600 < 24:
+                message += " Make sure to move your car!"
+
+            return {
+                "status": "success",
+                "message": message
+            }
+
+        elif followup_type == "no_parking_saved":
+            # User asked about parking but never told us where they parked
+            # Try to parse their answer as a new parking location
+            location_text = answer_text.strip()
+
+            location = self.parking_manager.parser.parse(location_text)
+            if not location:
+                return {
+                    "status": "error",
+                    "message": "I couldn't find that street. Could you say it again?"
+                }
+
+            # Check if we got side info this time
+            if location.side == "Unknown":
+                return {
+                    "status": "needs_followup",
+                    "followup_type": "parking_side",
+                    "partial_data": {"location": location},
+                    "message": "Which side of the street - north, south, east, or west?"
+                }
+
+            # Save complete location
+            self.parking_manager.save_parking_location(location)
+
+            from saga_assistant.parking import expand_street_abbreviations
+            street_spoken = expand_street_abbreviations(location.street)
+
+            return {
+                "status": "success",
+                "message": f"Got it. You're parked on {street_spoken}. I'll remind you about street sweeping."
+            }
+
+        else:
+            return {
+                "status": "error",
+                "message": "I lost track of what we were talking about. Could you start over?"
+            }
 
     def parse_and_execute(self, text: str) -> Dict[str, Any]:
         """Parse and execute a natural language command.

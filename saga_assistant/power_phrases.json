@@ -1,0 +1,58 @@
+{
+  "greetings": {
+    "hi|hello|hey": "Hello!",
+    "how are you|how's it going": "I'm doing great, thanks for asking!",
+    "good morning": "Good morning!",
+    "good night|goodnight": "Good night!"
+  },
+  "gratitude": {
+    "thank you|thanks": "You're welcome!",
+    "you're funny|that's funny": "Thanks! I try."
+  },
+  "time_queries": {
+    "what time is it|what's the time": "<TIME>",
+    "what's today's date|what's the date": "<DATE>"
+  },
+  "weather_current": {
+    "what's the weather|how's the weather|what's it like outside": "<WEATHER:now>",
+    "what's the weather today": "<WEATHER:today>",
+    "what's the weather this morning": "<WEATHER:this morning>",
+    "what's the weather this afternoon": "<WEATHER:this afternoon>",
+    "what's the weather tonight": "<WEATHER:tonight>"
+  },
+  "weather_forecast": {
+    "what's the weather tomorrow": "<WEATHER:tomorrow>",
+    "how's the weather tomorrow": "<WEATHER:tomorrow>"
+  },
+  "weather_rain": {
+    "when's it going to rain|when will it rain|is it going to rain": "<RAIN:today>",
+    "will it rain today|is it going to rain today": "<RAIN:today>",
+    "will it rain tomorrow|is it going to rain tomorrow": "<RAIN:tomorrow>"
+  },
+  "weather_wind": {
+    "how windy is it|what's the wind|how's the wind|is there much wind|is it windy|wind today": "<WIND>"
+  },
+  "timers_set": {
+    "set a timer for (\\d+) minutes?": "<TIMER:minutes>",
+    "set a timer for (\\d+) seconds?": "<TIMER:seconds>",
+    "timer for (\\d+) minutes?": "<TIMER:minutes>",
+    "timer for (\\d+) seconds?": "<TIMER:seconds>"
+  },
+  "timers_check": {
+    "how much time is left|how long on the timer|check the timer|timer status": "<TIMER:check>",
+    "how much longer|time left": "<TIMER:check>"
+  },
+  "timers_cancel": {
+    "cancel the timer|stop the timer|clear the timer|delete the timer": "<TIMER:cancel>",
+    "nevermind the timer": "<TIMER:cancel>"
+  },
+  "dismissals": {
+    "shut up|be quiet|stop talking": "Sorry about that.",
+    "nevermind|never mind|forget it": "Okay, no problem."
+  },
+  "confirmations": {
+    "okay|ok|alright": "Got it!",
+    "yes|yeah|yep": "Okay!",
+    "no|nope": "Understood."
+  }
+}
