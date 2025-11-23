@@ -4,6 +4,13 @@ A LAN-only voice assistant with custom wakeword detection for Home Assistant int
 
 ## Recent Updates (Latest Session)
 
+**2025-11-22**: Conversational Capabilities Proven
+- ✅ AI-to-AI conversation experiments show Saga can handle 45-60s responses
+- ✅ ~2 second reasoning time proves real-time dialogue is viable
+- ✅ TTS formatter abstracted to `saga_assistant/tts_formatter.py`
+- ✅ MVC architecture: LLM logic separate from voice presentation
+- ✅ See `docs/CONVERSATIONAL_CAPABILITIES.md` for full analysis
+
 **2025-11-18**: Phase 4 Complete - Power Phrases & Utilities
 - ✅ Weather integration (wttr.in API with voice-optimized responses)
 - ✅ Timer system with word number support ("five minutes", "twenty seconds")

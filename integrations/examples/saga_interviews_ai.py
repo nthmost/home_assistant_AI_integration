@@ -35,6 +35,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from piper import PiperVoice
 from faster_whisper import WhisperModel
+from saga_assistant.tts_formatter import format_for_tts
 
 # Configuration
 TTS_VOICE = "en_GB-semaine-medium"  # Saga's voice
@@ -81,46 +82,6 @@ Your communication approach:
 - Be cooperative in helping the other intelligence understand you
 
 This is a scientific study of digital-to-digital communication. Be authentic."""
-
-
-def format_for_tts(text):
-    """
-    Format LLM output for text-to-speech.
-    Strips markdown and formatting that sounds bad when spoken.
-
-    This is the "View" layer - LLM can use any formatting,
-    but we clean it before speaking.
-    """
-    # Remove markdown bold/italic
-    text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)  # **bold**
-    text = re.sub(r'\*([^*]+)\*', r'\1', text)      # *italic*
-    text = re.sub(r'__([^_]+)__', r'\1', text)      # __bold__
-    text = re.sub(r'_([^_]+)_', r'\1', text)        # _italic_
-
-    # Remove markdown headers
-    text = re.sub(r'^#{1,6}\s+', '', text, flags=re.MULTILINE)
-
-    # Convert bullet points to natural speech
-    text = re.sub(r'^\s*[-*+]\s+', '', text, flags=re.MULTILINE)
-
-    # Convert numbered lists to words
-    text = re.sub(r'^\s*1\.\s+', 'First, ', text, flags=re.MULTILINE)
-    text = re.sub(r'^\s*2\.\s+', 'Second, ', text, flags=re.MULTILINE)
-    text = re.sub(r'^\s*3\.\s+', 'Third, ', text, flags=re.MULTILINE)
-    text = re.sub(r'^\s*4\.\s+', 'Fourth, ', text, flags=re.MULTILINE)
-    text = re.sub(r'^\s*5\.\s+', 'Fifth, ', text, flags=re.MULTILINE)
-    text = re.sub(r'^\s*(\d+)\.\s+', r'Number \1, ', text, flags=re.MULTILINE)
-
-    # Remove code blocks
-    text = re.sub(r'```[^`]*```', '', text, flags=re.DOTALL)
-    text = re.sub(r'`([^`]+)`', r'\1', text)
-
-    # Clean up extra whitespace
-    text = re.sub(r'\n\n+', '. ', text)  # Multiple newlines become periods
-    text = re.sub(r'\n', ' ', text)       # Single newlines become spaces
-    text = re.sub(r'\s+', ' ', text)      # Multiple spaces to single
-
-    return text.strip()
 
 
 def find_emeet_input():
