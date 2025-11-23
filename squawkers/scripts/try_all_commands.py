@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 from dotenv import load_dotenv
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from squawkers.squawkers_full import SquawkersFull
 from squawkers.squawkers import CommandError

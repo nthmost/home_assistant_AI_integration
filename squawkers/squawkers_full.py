@@ -81,28 +81,28 @@ class SquawkersFull(BaseSquawkers):
     # Command Mode buttons (for custom voice commands)
 
     def command_a(self, num_repeats: Optional[int] = None) -> bool:
-        """Command Button A"""
-        return self.command("Command Button A", num_repeats=num_repeats)
+        """Command A"""
+        return self.command("Command A", num_repeats=num_repeats)
 
     def command_b(self, num_repeats: Optional[int] = None) -> bool:
-        """Command Button B"""
-        return self.command("Command Button B", num_repeats=num_repeats)
+        """Command B"""
+        return self.command("Command B", num_repeats=num_repeats)
 
     def command_c(self, num_repeats: Optional[int] = None) -> bool:
-        """Command Button C"""
-        return self.command("Command Button C", num_repeats=num_repeats)
+        """Command C"""
+        return self.command("Command C", num_repeats=num_repeats)
 
     def command_d(self, num_repeats: Optional[int] = None) -> bool:
-        """Command Button D"""
-        return self.command("Command Button D", num_repeats=num_repeats)
+        """Command D"""
+        return self.command("Command D", num_repeats=num_repeats)
 
     def command_e(self, num_repeats: Optional[int] = None) -> bool:
-        """Command Button E"""
-        return self.command("Command Button E", num_repeats=num_repeats)
+        """Command E"""
+        return self.command("Command E", num_repeats=num_repeats)
 
     def command_f(self, num_repeats: Optional[int] = None) -> bool:
-        """Command Button F"""
-        return self.command("Command Button F", num_repeats=num_repeats)
+        """Command F"""
+        return self.command("Command F", num_repeats=num_repeats)
 
     # Plain buttons
 
@@ -156,6 +156,58 @@ class SquawkersFull(BaseSquawkers):
         """Gags F"""
         return self.command("Gags F", num_repeats=num_repeats)
 
+    # Record Command buttons (for recording custom commands)
+
+    def record_command_a(self, num_repeats: Optional[int] = None) -> bool:
+        """Record Command A"""
+        return self.command("Record Command A", num_repeats=num_repeats)
+
+    def record_command_b(self, num_repeats: Optional[int] = None) -> bool:
+        """Record Command B"""
+        return self.command("Record Command B", num_repeats=num_repeats)
+
+    def record_command_c(self, num_repeats: Optional[int] = None) -> bool:
+        """Record Command C"""
+        return self.command("Record Command C", num_repeats=num_repeats)
+
+    def record_command_d(self, num_repeats: Optional[int] = None) -> bool:
+        """Record Command D"""
+        return self.command("Record Command D", num_repeats=num_repeats)
+
+    def record_command_e(self, num_repeats: Optional[int] = None) -> bool:
+        """Record Command E"""
+        return self.command("Record Command E", num_repeats=num_repeats)
+
+    def record_command_f(self, num_repeats: Optional[int] = None) -> bool:
+        """Record Command F"""
+        return self.command("Record Command F", num_repeats=num_repeats)
+
+    # Record Response buttons (for recording custom responses)
+
+    def record_response_a(self, num_repeats: Optional[int] = None) -> bool:
+        """Record Response A"""
+        return self.command("Record Response A", num_repeats=num_repeats)
+
+    def record_response_b(self, num_repeats: Optional[int] = None) -> bool:
+        """Record Response B"""
+        return self.command("Record Response B", num_repeats=num_repeats)
+
+    def record_response_c(self, num_repeats: Optional[int] = None) -> bool:
+        """Record Response C"""
+        return self.command("Record Response C", num_repeats=num_repeats)
+
+    def record_response_d(self, num_repeats: Optional[int] = None) -> bool:
+        """Record Response D"""
+        return self.command("Record Response D", num_repeats=num_repeats)
+
+    def record_response_e(self, num_repeats: Optional[int] = None) -> bool:
+        """Record Response E"""
+        return self.command("Record Response E", num_repeats=num_repeats)
+
+    def record_response_f(self, num_repeats: Optional[int] = None) -> bool:
+        """Record Response F"""
+        return self.command("Record Response F", num_repeats=num_repeats)
+
     # Convenience methods for groups
 
     def list_response_methods(self):
@@ -186,6 +238,20 @@ class SquawkersFull(BaseSquawkers):
             "gag_d", "gag_e", "gag_f"
         ]
 
+    def list_record_command_methods(self):
+        """List all Record Command methods"""
+        return [
+            "record_command_a", "record_command_b", "record_command_c",
+            "record_command_d", "record_command_e", "record_command_f"
+        ]
+
+    def list_record_response_methods(self):
+        """List all Record Response methods"""
+        return [
+            "record_response_a", "record_response_b", "record_response_c",
+            "record_response_d", "record_response_e", "record_response_f"
+        ]
+
     def list_all_methods(self):
         """List all available command methods"""
         return {
@@ -193,7 +259,9 @@ class SquawkersFull(BaseSquawkers):
             "response": self.list_response_methods(),
             "command": self.list_command_methods(),
             "button": self.list_button_methods(),
-            "gag": self.list_gag_methods()
+            "gag": self.list_gag_methods(),
+            "record_command": self.list_record_command_methods(),
+            "record_response": self.list_record_response_methods()
         }
 
 
