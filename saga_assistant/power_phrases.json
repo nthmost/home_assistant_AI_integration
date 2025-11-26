@@ -22,7 +22,13 @@
   },
   "weather_forecast": {
     "what's the weather tomorrow": "<WEATHER:tomorrow>",
-    "how's the weather tomorrow": "<WEATHER:tomorrow>"
+    "how's the weather tomorrow": "<WEATHER:tomorrow>",
+    "weather tomorrow": "<WEATHER:tomorrow>",
+    "tomorrow's weather": "<WEATHER:tomorrow>"
+  },
+  "weather_evening": {
+    "what's the weather this evening|weather this evening|how's the weather this evening": "<WEATHER:tonight>",
+    "what's the weather tonight|weather tonight": "<WEATHER:tonight>"
   },
   "weather_rain": {
     "when's it going to rain|when will it rain|is it going to rain": "<RAIN:today>",
