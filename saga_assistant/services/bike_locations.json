@@ -1,0 +1,24 @@
+{
+  "locations": [
+    {
+      "name": "San Francisco",
+      "zip": "94118",
+      "description": "Home base"
+    },
+    {
+      "name": "Marin City",
+      "zip": "94965",
+      "description": "Marin Headlands rides"
+    },
+    {
+      "name": "Sausalito",
+      "zip": "94965",
+      "description": "Bay views, easier rides"
+    },
+    {
+      "name": "Daly City",
+      "zip": "94014",
+      "description": "South bay coastal"
+    }
+  ]
+}

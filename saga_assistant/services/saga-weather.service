@@ -1,0 +1,17 @@
+[Unit]
+Description=Saga Multi-Location Weather Fetcher (V2)
+After=network.target
+
+[Service]
+Type=simple
+User=%u
+WorkingDirectory=%h/projects/git/home_assistant_AI_integration
+Environment="PYTHONPATH=%h/projects/git/home_assistant_AI_integration"
+ExecStart=/usr/bin/python3 saga_assistant/services/weather_fetcher_v2.py --daemon --interval 20
+Restart=always
+RestartSec=60
+StandardOutput=append:/tmp/saga-weather.log
+StandardError=append:/tmp/saga-weather-error.log
+
+[Install]
+WantedBy=multi-user.target

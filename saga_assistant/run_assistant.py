@@ -29,8 +29,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from saga_assistant.ha_client import HomeAssistantClient
 from saga_assistant.intent_parser import IntentParser, IntentParseError
-from saga_assistant.weather import get_weather, will_it_rain, get_wind_info
+from saga_assistant.weather_v2 import get_weather, get_week_summary, will_it_rain, get_wind_info
 from saga_assistant.timers import TimerManager
+from saga_assistant.timer_sounds import TimerSoundManager
+from saga_assistant.memory import ContextBuilder
 
 # Configure logging
 logging.basicConfig(
@@ -134,6 +136,7 @@ class SagaAssistant:
         self.emeet_output = None
         self.power_phrases = {}
         self.timer_manager = TimerManager()
+        self.timer_sounds = TimerSoundManager()
 
         # Conversation state for follow-up questions
         self.awaiting_followup = False
@@ -171,9 +174,24 @@ class SagaAssistant:
             logger.info(f"⏰ Reminder '{name}' expired - announcing: {message}")
             self.speak(f"Reminder: {message}")
         else:
-            # This is a timer
-            logger.info(f"⏰ Timer '{name}' expired - announcing")
-            self.speak("Your timer is up!")
+            # This is a timer - play custom sound if available
+            logger.info(f"⏰ Timer '{name}' expired")
+
+            # Get sound for this timer type
+            sound_path = self.timer_sounds.get_sound_for_timer(name)
+
+            if sound_path:
+                logger.info(f"🔊 Playing custom sound for '{name}' timer")
+                self._play_wav(sound_path)
+            else:
+                # No custom sound, use default
+                logger.info(f"🔊 Playing default timer sound")
+                default_sound = self.timer_sounds.get_default_sound()
+                if default_sound:
+                    self._play_wav(default_sound)
+                else:
+                    # Fallback to speech
+                    self.speak("Your timer is up!")
 
     def _find_audio_devices(self):
         """Find EMEET audio devices."""
@@ -303,7 +321,12 @@ Be HELPFUL first, entertaining second. Keep it SHORT."""
         # Always init IntentParser (supports parking even without HA)
         logger.info("🧠 Loading intent parser...")
         self.intent_parser = IntentParser(self.ha_client)
-        logger.info("   ✅ Intent parser ready (HA + parking support)")
+        logger.info("   ✅ Intent parser ready (HA + parking + memory support)")
+
+        # Initialize context builder for memory system
+        logger.info("🧠 Loading memory context builder...")
+        self.context_builder = ContextBuilder(self.intent_parser.memory_db)
+        logger.info("   ✅ Memory context ready")
 
     def play_confirmation_beep(self):
         """Play a short confirmation beep when wakeword is detected."""
@@ -556,20 +579,47 @@ Be HELPFUL first, entertaining second. Keep it SHORT."""
         """
         text_lower = text.lower()
 
-        # Special handling for weather queries with locations
-        # "What's the weather in Seattle?" or "What's the weather in Seattle tomorrow?"
-        weather_in_match = re.search(r"what'?s? the weather in ([a-z\s]+?)(?:\s+(today|tomorrow|tonight|this morning|this afternoon))?$", text_lower)
-        if weather_in_match:
-            location = weather_in_match.group(1).strip()
-            when = weather_in_match.group(2) or "now"
-            return get_weather(location=location, when=when)
+        # Smart weather query parser - extracts time from any weather question
+        # Catches: "what's the weather", "weather", "how's the weather", etc.
+        if re.search(r"\b(weather|forecast)\b", text_lower):
+            # Extract time keywords
+            when = "now"  # default
+            if re.search(r"\btomorrow\b", text_lower):
+                when = "tomorrow"
+            elif re.search(r"\b(this evening|tonight|this night)\b", text_lower):
+                when = "tonight"
+            elif re.search(r"\bthis afternoon\b", text_lower):
+                when = "this afternoon"
+            elif re.search(r"\bthis morning\b", text_lower):
+                when = "this morning"
+            elif re.search(r"\b(today|now|currently|right now)\b", text_lower):
+                when = "today"
+            elif re.search(r"\b(this week|the week|for the week|weekly)\b", text_lower):
+                # Extract location for week summary
+                location_match = re.search(r"\bin ([a-z\s]+?)(?:\s+for the week|\s+this week|\s+weekly|$)", text_lower)
+                location = location_match.group(1).strip() if location_match else None
+                return get_week_summary(location=location)
+
+            # Extract location if specified
+            location_match = re.search(r"\bin ([a-z\s]+?)(?:\s+(today|tomorrow|tonight|this morning|this afternoon)|$)", text_lower)
+            if location_match:
+                location = location_match.group(1).strip()
+                return get_weather(location=location, when=when)
+
+            # Default location
+            return get_weather(when=when)
 
         # Special handling for timer commands (accept both digits and words)
-        # "Set a timer for 5 minutes" or "Set a timer for five minutes"
-        timer_set_match = re.search(r"(?:set a |)timer for (\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty) (minute|second)s?", text_lower)
+        # Supports: "Set a timer for 5 minutes" or "Set a laundry timer for 60 minutes"
+        # Extract timer type if specified (e.g., "laundry timer", "tea timer", "meditation timer")
+        timer_set_match = re.search(
+            r"(?:set a |set |)(?:([a-z]+) |)timer for (\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty) (minute|second)s?",
+            text_lower
+        )
         if timer_set_match:
-            duration_str = timer_set_match.group(1)
-            unit = timer_set_match.group(2)
+            timer_type = timer_set_match.group(1)  # May be None for generic "timer"
+            duration_str = timer_set_match.group(2)
+            unit = timer_set_match.group(3)
 
             # Convert word to number if needed
             if duration_str.isdigit():
@@ -579,14 +629,25 @@ Be HELPFUL first, entertaining second. Keep it SHORT."""
                 if duration is None:
                     duration = 1  # Fallback
 
+            # Use timer type as name if specified, otherwise "timer"
+            timer_name = timer_type if timer_type else "timer"
+
+            # Check if this is a new timer type without assigned sound
+            if timer_type and not self.timer_sounds.has_sound_for_timer(timer_type):
+                logger.info(f"🆕 New timer type detected: '{timer_type}'")
+                # For now, just log it - future enhancement: offer sound selection
+                # TODO: Implement voice-based sound selection dialog
+
             if unit == "minute":
                 return self.timer_manager.set_timer(
                     duration_minutes=duration,
+                    name=timer_name,
                     callback=self.timer_expired_callback
                 )
             else:
                 return self.timer_manager.set_timer(
                     duration_seconds=duration,
+                    name=timer_name,
                     callback=self.timer_expired_callback
                 )
 
@@ -703,11 +764,21 @@ Be HELPFUL first, entertaining second. Keep it SHORT."""
             logger.info(f"   💬⚡ ({elapsed:.2f}s): \"{power_response}\"")
             return power_response
 
-        # Try intent parsing (HA + parking) second
+        # Try intent parsing (HA + parking + memory) second
         if self.intent_parser:
             try:
                 logger.info("🔍 Checking for intent command...")
                 intent = self.intent_parser.parse(text)
+
+                # Memory commands - high priority (user is explicitly managing memory)
+                if intent.action in ["save_preference", "remember_fact", "show_preferences", "show_memory", "forget_memory"]:
+                    logger.info(f"   🧠 Memory command detected: {intent.action}")
+                    start_time = time.time()
+                    result = self.intent_parser.execute(intent)
+                    elapsed = time.time() - start_time
+                    response_text = result.get("message", "Got it.")
+                    logger.info(f"   💬🧠 ({elapsed:.2f}s): \"{response_text}\"")
+                    return response_text
 
                 # Minnie blame queries - always high priority!
                 if intent.action == "minnie_blame":
@@ -795,11 +866,17 @@ Be HELPFUL first, entertaining second. Keep it SHORT."""
         logger.info("🤖 Generating response...")
         start_time = time.time()
 
+        # Build context-enhanced system prompt with user preferences
+        enhanced_prompt = self.context_builder.format_for_system_prompt(
+            self.system_prompt,
+            utterance=prompt
+        )
+
         try:
             response = self.llm.chat.completions.create(
                 model=LLM_MODEL,
                 messages=[
-                    {"role": "system", "content": self.system_prompt},
+                    {"role": "system", "content": enhanced_prompt},
                     {"role": "user", "content": prompt}
                 ],
                 max_tokens=30,  # Aggressive brevity for speed - voice needs to be snappy!
@@ -815,6 +892,48 @@ Be HELPFUL first, entertaining second. Keep it SHORT."""
         except Exception as e:
             logger.error(f"LLM generation failed: {e}")
             return "I'm sorry, I had trouble processing that request."
+
+    def _play_wav(self, wav_path: str):
+        """Play a WAV file.
+
+        Args:
+            wav_path: Path to WAV file
+        """
+        import wave
+
+        try:
+            with wave.open(wav_path, 'rb') as wav_file:
+                sample_rate = wav_file.getframerate()
+                n_channels = wav_file.getnchannels()
+                audio_data = wav_file.readframes(wav_file.getnframes())
+
+                # Convert to numpy array
+                if wav_file.getsampwidth() == 2:  # 16-bit
+                    audio_array = np.frombuffer(audio_data, dtype=np.int16)
+                else:
+                    logger.error(f"Unsupported WAV format: {wav_file.getsampwidth()} bytes per sample")
+                    return
+
+                # Convert to float
+                audio_array = audio_array.astype(np.float32) / 32768.0
+
+                # Handle stereo (convert to mono if needed)
+                if n_channels == 2:
+                    audio_array = audio_array.reshape(-1, 2).mean(axis=1)
+
+                # Play audio
+                sd.play(audio_array, samplerate=sample_rate, device=self.emeet_output)
+                sd.wait()
+
+                logger.info("   ✅ Sound complete")
+
+                # Add cooldown to prevent audio device contention
+                # macOS Core Audio needs time to release the device before input can be opened
+                # OPTIMIZED: Reduced from 0.5s to 0.2s based on measured switching time (72ms avg)
+                time.sleep(0.2)  # Phase 1 optimization: faster return to wakeword detection
+
+        except Exception as e:
+            logger.error(f"Failed to play WAV: {e}")
 
     def speak(self, text: str):
         """
@@ -847,8 +966,9 @@ Be HELPFUL first, entertaining second. Keep it SHORT."""
             # Add cooldown to prevent TTS from triggering wakeword + ensure device is released
             # TTS echoes can sound similar to "Hey Saga"
             # BUT: Skip cooldown if we're waiting for follow-up (no wakeword detection)
+            # OPTIMIZED: Reduced from 1.2s to 0.5s based on measured device switching time (72ms avg)
             if not self.awaiting_followup:
-                time.sleep(1.2)  # 1.2 second cooldown (extra 0.2s for device release)
+                time.sleep(0.5)  # Phase 1 optimization: faster response
             else:
                 time.sleep(0.2)  # Just enough to release audio device
 
