@@ -35,7 +35,26 @@ class IntentParser:
 
     # Action patterns
     ACTION_PATTERNS = {
-        # Minnie blame (check FIRST before other actions)
+        # Memory management (check FIRST - user wants to save/forget things)
+        "save_preference": [
+            r"\b(in general |generally )?i (prefer|like|want)\b",
+            r"\bmy default .+ (is|should be)\b",
+            r"\bi have a preference for\b",
+            r"\b(prefer|like) .+ for (my|the)\b",
+        ],
+        "remember_fact": [
+            r"\b(remember that|keep in mind that|for future reference|don't forget)\b",
+        ],
+        "forget_memory": [
+            r"\b(forget (?:about )?|clear (?:my )?memory|reset (?:your )?memory)\b",
+        ],
+        "show_preferences": [
+            r"\b(what (?:do you know about my |are my )?preferences|show (?:my )?preferences)\b",
+        ],
+        "show_memory": [
+            r"\b(what do you (remember|know) about me|what facts do you know)\b",
+        ],
+        # Minnie blame (check EARLY before other actions)
         "minnie_blame": [
             r"\b(who'?s fault|whose fault|who is to blame|who did this|who'?s to blame|who made this mess|what happened|who broke|who kicked|why is there|who was yodeling|who'?s running|who should we blame|who do we blame)\b",
             r"\b(was it minnie|is it minnie|did minnie|is this minnie|blame minnie)\b",
@@ -122,6 +141,26 @@ class IntentParser:
         # Lazy init Minnie model
         self._minnie_model = None
 
+        # Lazy init memory system
+        self._memory_db = None
+        self._preference_manager = None
+
+    @property
+    def memory_db(self):
+        """Lazy-load memory database"""
+        if self._memory_db is None:
+            from saga_assistant.memory import MemoryDatabase
+            self._memory_db = MemoryDatabase()
+        return self._memory_db
+
+    @property
+    def preference_manager(self):
+        """Lazy-load preference manager"""
+        if self._preference_manager is None:
+            from saga_assistant.memory import PreferenceManager
+            self._preference_manager = PreferenceManager(self.memory_db)
+        return self._preference_manager
+
     @property
     def parking_manager(self):
         """Lazy-load parking manager"""
@@ -166,6 +205,11 @@ class IntentParser:
                 confidence=1.0,  # Always high confidence for Minnie!
                 data={"question": text}
             )
+
+        # Handle memory actions specially
+        if action in ["save_preference", "remember_fact", "forget_memory",
+                      "show_preferences", "show_memory"]:
+            return self._parse_memory_intent(action, text)
 
         # Handle parking actions specially
         if action in ["save_parking", "where_parked", "when_to_move"]:
@@ -329,6 +373,54 @@ class IntentParser:
 
         return None, 0.0
 
+    def _parse_memory_intent(self, action: str, text: str) -> Intent:
+        """Parse memory-specific intents.
+
+        Args:
+            action: Memory action (save_preference, remember_fact, etc.)
+            text: Original text
+
+        Returns:
+            Memory Intent
+        """
+        data = {"original_text": text}
+        confidence = 0.9  # High confidence for memory actions
+
+        if action == "save_preference":
+            # Extract preference details
+            # Pattern: "I prefer X" or "I like Y for Z"
+            preference_patterns = [
+                r"(?:in general |generally )?i (?:prefer|like|want)\s+(.+)",
+                r"my default (.+?) (?:is|should be)\s+(.+)",
+                r"i have a preference for\s+(.+)",
+            ]
+
+            for pattern in preference_patterns:
+                match = re.search(pattern, text, re.IGNORECASE)
+                if match:
+                    data['preference_text'] = match.group(1).strip()
+                    break
+
+        elif action == "remember_fact":
+            # Extract fact
+            fact_patterns = [
+                r"(?:remember that|keep in mind that|for future reference,?|don't forget)\s+(.+)",
+            ]
+
+            for pattern in fact_patterns:
+                match = re.search(pattern, text, re.IGNORECASE)
+                if match:
+                    data['fact_text'] = match.group(1).strip()
+                    break
+
+        logger.info(f"Parsed memory intent: action={action}, data={data}")
+
+        return Intent(
+            action=action,
+            confidence=confidence,
+            data=data
+        )
+
     def _parse_parking_intent(self, action: str, text: str) -> Intent:
         """Parse parking-specific intents
 
@@ -390,6 +482,63 @@ class IntentParser:
             return {
                 "status": "success",
                 "message": response
+            }
+
+        # Handle memory actions
+        if intent.action == "save_preference":
+            # For now, store the raw text - we'll enhance with LLM later
+            preference_text = intent.data.get('preference_text', intent.data.get('original_text'))
+
+            # Simple categorization for MVP
+            # TODO: Use LLM to extract category/key/value
+            self.preference_manager.save_preference(
+                category="general",
+                preference_key="preference",
+                preference_value=preference_text
+            )
+
+            return {
+                "status": "success",
+                "message": "Got it. I'll remember that preference."
+            }
+
+        elif intent.action == "remember_fact":
+            fact_text = intent.data.get('fact_text', intent.data.get('original_text'))
+
+            # Store in facts table (will implement in Phase 2)
+            # For now, just acknowledge
+            logger.info(f"Would remember fact: {fact_text}")
+
+            return {
+                "status": "success",
+                "message": "I'll remember that."
+            }
+
+        elif intent.action == "show_preferences":
+            formatted_prefs = self.preference_manager.format_for_display()
+
+            return {
+                "status": "success",
+                "message": f"Here are your preferences: {formatted_prefs}"
+            }
+
+        elif intent.action == "show_memory":
+            stats = self.memory_db.get_stats()
+            msg = f"I remember {stats['preferences']} preferences"
+            if stats['facts'] > 0:
+                msg += f" and {stats['facts']} facts"
+
+            return {
+                "status": "success",
+                "message": msg
+            }
+
+        elif intent.action == "forget_memory":
+            # This should trigger confirmation in the assistant
+            return {
+                "status": "needs_confirmation",
+                "confirmation_type": "clear_memory",
+                "message": "This will delete all your preferences and facts. Are you sure?"
             }
 
         # Handle parking actions
