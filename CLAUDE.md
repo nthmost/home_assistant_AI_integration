@@ -45,8 +45,12 @@
 
 ### Code Organization
 - **All imports at top of file, never in functions**
+  - Exception: ONLY if there's a circular import that cannot be solved by refactoring
+  - Exception: ONLY if there's an import that takes >100ms to load (measure first!)
+  - Exception: ONLY if there's an optional dependency that might not be installed
+  - **Do NOT use lazy-loading properties without discussing the specific problem first**
 - Keep imports organized: stdlib, third-party, local modules
-- Avoid lazy imports unless there's a strong performance reason
+- Initialize dependencies in `__init__`, not via `@property` lazy-loading
 
 ### Display Mode vs Headless Mode
 - **ASCII displays: completely suppress logging when display is active**
