@@ -10,6 +10,8 @@ from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass
 
 from saga_assistant.ha_client import HomeAssistantClient
+from saga_assistant.modules.road_trip import RoadTripHandler
+from saga_assistant.modules.road_trip.routing import Location, GeocodingError, RoutingError
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +25,7 @@ class Intent:
     entity_id: Optional[str] = None  # Full entity_id if resolved
     confidence: float = 0.0  # 0.0-1.0 confidence score
     data: Optional[Dict[str, Any]] = None  # Extra data (e.g., parking location)
+    quick_mode: bool = False  # Quick response mode (brief answers only)
 
 
 class IntentParseError(Exception):
@@ -106,6 +109,23 @@ class IntentParser:
             r"\b(when (is|do i have) street cleaning)\b",
             r"\b(any (street sweeping|parking restrictions))\b",
         ],
+        # Road trip planning (distance, time, routes)
+        "road_trip_distance": [
+            r"\b(how far|how many miles|what'?s the distance|distance to)\b.*(to|is it to)\b",
+            r"\b(miles to|kilometers to)\b",
+        ],
+        "road_trip_time": [
+            r"\b(how long|drive time|travel time|time to (get to|drive to|reach))\b",
+            r"\b(how long (will it take|does it take|is the drive))\b",
+        ],
+        "road_trip_best_time": [
+            r"\b(when should i leave|best time to leave|when (to|should i) depart)\b",
+            r"\b(what time should i leave|optimal (time|departure))\b",
+        ],
+        "road_trip_poi": [
+            r"\b(landmarks|points of interest|things to see|places to stop|stops)\b.*(between|along|on the way)\b",
+            r"\b(what (can i see|is there to see)|interesting (places|spots|locations))\b.*(between|along|to)\b",
+        ],
     }
 
     # Entity type patterns
@@ -144,6 +164,29 @@ class IntentParser:
         # Lazy init memory system
         self._memory_db = None
         self._preference_manager = None
+
+        # Initialize road trip handler
+        self._road_trip_handler = self._init_road_trip_handler()
+
+    def _init_road_trip_handler(self) -> RoadTripHandler:
+        """Initialize the road trip handler.
+
+        Returns:
+            RoadTripHandler instance
+        """
+        # Get HA config if available
+        if self.ha_client:
+            # TODO: Get actual lat/lon from HA config
+            ha_config = {
+                'latitude': 37.7749,
+                'longitude': -122.4194,
+                'unit_system': {'name': 'imperial'}
+            }
+            return RoadTripHandler.from_ha_config(ha_config)
+        else:
+            # Fallback: create handler with default SF location
+            home = Location(latitude=37.7749, longitude=-122.4194, address="home")
+            return RoadTripHandler(home, unit_system='imperial')
 
     @property
     def memory_db(self):
@@ -193,6 +236,16 @@ class IntentParser:
         text = text.lower().strip()
         logger.debug(f"Parsing: {text}")
 
+        # Check for "quick question" power phrase
+        quick_mode = False
+        if text.startswith("quick question"):
+            quick_mode = True
+            # Remove the phrase and any trailing punctuation/whitespace
+            text = text.replace("quick question", "", 1).strip()
+            # Strip leading punctuation (period, comma, dash, etc.)
+            text = text.lstrip('.,;:!?- ').strip()
+            logger.debug(f"Quick mode enabled, parsing: {text}")
+
         # Parse action
         action = self._parse_action(text)
         if not action:
@@ -203,7 +256,8 @@ class IntentParser:
             return Intent(
                 action="minnie_blame",
                 confidence=1.0,  # Always high confidence for Minnie!
-                data={"question": text}
+                data={"question": text},
+                quick_mode=quick_mode
             )
 
         # Handle memory actions specially
@@ -214,6 +268,10 @@ class IntentParser:
         # Handle parking actions specially
         if action in ["save_parking", "where_parked", "when_to_move"]:
             return self._parse_parking_intent(action, text)
+
+        # Handle road trip actions specially
+        if action in ["road_trip_distance", "road_trip_time", "road_trip_best_time", "road_trip_poi"]:
+            return self._parse_road_trip_intent(action, text, quick_mode)
 
         # Parse entity type and name for HA actions
         entity_type = self._parse_entity_type(text)
@@ -231,7 +289,8 @@ class IntentParser:
 
         logger.info(
             f"Parsed intent: action={action}, type={entity_type}, "
-            f"name={entity_name}, id={entity_id}, confidence={confidence:.2f}"
+            f"name={entity_name}, id={entity_id}, confidence={confidence:.2f}, "
+            f"quick_mode={quick_mode}"
         )
 
         return Intent(
@@ -240,6 +299,7 @@ class IntentParser:
             entity_name=entity_name,
             entity_id=entity_id,
             confidence=confidence,
+            quick_mode=quick_mode,
         )
 
     def _parse_action(self, text: str) -> Optional[str]:
@@ -418,7 +478,8 @@ class IntentParser:
         return Intent(
             action=action,
             confidence=confidence,
-            data=data
+            data=data,
+            quick_mode=False  # Memory actions don't support quick mode
         )
 
     def _parse_parking_intent(self, action: str, text: str) -> Intent:
@@ -460,8 +521,90 @@ class IntentParser:
         return Intent(
             action=action,
             confidence=confidence,
-            data=data
+            data=data,
+            quick_mode=False  # Parking actions don't support quick mode yet
         )
+
+    def _parse_road_trip_intent(self, action: str, text: str, quick_mode: bool) -> Intent:
+        """Parse road trip planning intents.
+
+        Args:
+            action: Road trip action (road_trip_distance, road_trip_time, etc.)
+            text: Original text
+            quick_mode: Whether quick mode is enabled
+
+        Returns:
+            Road trip Intent
+        """
+        data = {"query": text}
+        confidence = 0.9  # High confidence for road trip actions
+
+        # Extract destination from common patterns
+        # "how far to LA", "how long is the drive to Big Sur", etc.
+        destination_patterns = [
+            r"to ([a-z\s]+?)(?:\?|$)",  # "to LA?", "to Big Sur"
+            r"is it to ([a-z\s]+?)(?:\?|$)",  # "is it to LA?"
+            r"the drive to ([a-z\s]+?)(?:\?|$)",  # "the drive to Big Sur"
+        ]
+
+        destination = None
+        for pattern in destination_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                destination = match.group(1).strip()
+                break
+
+        if destination:
+            data['destination'] = destination
+            logger.info(f"Extracted destination: {destination}")
+        else:
+            confidence = 0.5
+            logger.warning(f"Could not extract destination from: {text}")
+
+        logger.info(f"Parsed road trip intent: action={action}, quick_mode={quick_mode}, confidence={confidence:.2f}")
+
+        return Intent(
+            action=action,
+            confidence=confidence,
+            data=data,
+            quick_mode=quick_mode
+        )
+
+    def _execute_road_trip_intent(self, intent: Intent) -> Dict[str, Any]:
+        """Execute a road trip planning intent.
+
+        Args:
+            intent: Road trip intent to execute
+
+        Returns:
+            Result dictionary with status and message
+        """
+        query = intent.data.get('query', '')
+
+        try:
+            response = self._road_trip_handler.handle_query(query, quick_mode=intent.quick_mode)
+            return {
+                "status": "success",
+                "message": response
+            }
+        except GeocodingError as e:
+            logger.warning(f"Geocoding failed for road trip query: {e}")
+            return {
+                "status": "error",
+                "message": "I couldn't find that location. Could you be more specific?"
+            }
+        except RoutingError as e:
+            logger.warning(f"Routing failed for road trip query: {e}")
+            return {
+                "status": "error",
+                "message": "I couldn't calculate a route to that location."
+            }
+        except ValueError as e:
+            logger.warning(f"Invalid road trip query: {e}")
+            return {
+                "status": "error",
+                "message": f"Sorry, I couldn't understand that query: {str(e)}"
+            }
 
     def execute(self, intent: Intent) -> Dict[str, Any]:
         """Execute an intent.
@@ -540,6 +683,10 @@ class IntentParser:
                 "confirmation_type": "clear_memory",
                 "message": "This will delete all your preferences and facts. Are you sure?"
             }
+
+        # Handle road trip actions
+        if intent.action in ["road_trip_distance", "road_trip_time", "road_trip_best_time", "road_trip_poi"]:
+            return self._execute_road_trip_intent(intent)
 
         # Handle parking actions
         if intent.action == "save_parking":
