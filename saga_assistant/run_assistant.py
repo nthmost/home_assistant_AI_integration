@@ -579,6 +579,15 @@ Be HELPFUL first, entertaining second. Keep it SHORT."""
         """
         text_lower = text.lower()
 
+        # Check for "quick question" power phrase
+        quick_mode = False
+        if text_lower.startswith("quick question"):
+            quick_mode = True
+            # Remove the phrase and strip punctuation
+            text_lower = text_lower.replace("quick question", "", 1).strip()
+            text_lower = text_lower.lstrip('.,;:!?- ').strip()
+            logger.debug(f"Quick mode enabled for power phrase, parsing: {text_lower}")
+
         # Smart weather query parser - extracts time from any weather question
         # Catches: "what's the weather", "weather", "how's the weather", etc.
         if re.search(r"\b(weather|forecast)\b", text_lower):
@@ -604,10 +613,10 @@ Be HELPFUL first, entertaining second. Keep it SHORT."""
             location_match = re.search(r"\bin ([a-z\s]+?)(?:\s+(today|tomorrow|tonight|this morning|this afternoon)|$)", text_lower)
             if location_match:
                 location = location_match.group(1).strip()
-                return get_weather(location=location, when=when)
+                return get_weather(location=location, when=when, quick_mode=quick_mode)
 
             # Default location
-            return get_weather(when=when)
+            return get_weather(when=when, quick_mode=quick_mode)
 
         # Special handling for timer commands (accept both digits and words)
         # Supports: "Set a timer for 5 minutes" or "Set a laundry timer for 60 minutes"
@@ -790,10 +799,15 @@ Be HELPFUL first, entertaining second. Keep it SHORT."""
                     logger.info(f"   💬🐱 ({elapsed:.2f}s): \"{response_text}\"")
                     return response_text
 
-                # Parking intents don't need entity_id
-                if intent.action in ["save_parking", "where_parked", "when_to_move", "forget_parking"]:
+                # Parking and road trip intents don't need entity_id
+                if intent.action in ["save_parking", "where_parked", "when_to_move", "forget_parking",
+                                     "road_trip_distance", "road_trip_time", "road_trip_best_time", "road_trip_poi"]:
                     if intent.confidence >= 0.6:
-                        logger.info(f"   🚗 Parking command detected (confidence: {intent.confidence:.2f})")
+                        # Log with appropriate emoji
+                        if intent.action.startswith("road_trip"):
+                            logger.info(f"   🚗 Road trip query detected (confidence: {intent.confidence:.2f})")
+                        else:
+                            logger.info(f"   🚗 Parking command detected (confidence: {intent.confidence:.2f})")
                         start_time = time.time()
                         result = self.intent_parser.execute(intent)
                         elapsed = time.time() - start_time
@@ -804,12 +818,14 @@ Be HELPFUL first, entertaining second. Keep it SHORT."""
                             self.followup_type = result.get("followup_type")
                             self.followup_data = result.get("partial_data")
                             response_text = result.get("message", "I need more information.")
-                            logger.info(f"   💬🚗❓ ({elapsed:.2f}s): \"{response_text}\"")
+                            emoji = "🗺️" if intent.action.startswith("road_trip") else "🚗"
+                            logger.info(f"   💬{emoji}❓ ({elapsed:.2f}s): \"{response_text}\"")
                             logger.info(f"   ⏸️  Waiting for follow-up: {self.followup_type}")
                             return response_text
 
                         response_text = result.get("message", "Command executed successfully.")
-                        logger.info(f"   💬🚗 ({elapsed:.2f}s): \"{response_text}\"")
+                        emoji = "🗺️" if intent.action.startswith("road_trip") else "🚗"
+                        logger.info(f"   💬{emoji} ({elapsed:.2f}s): \"{response_text}\"")
                         return response_text
                     else:
                         logger.info(f"   ⚠️  Low confidence ({intent.confidence:.2f}), using LLM")

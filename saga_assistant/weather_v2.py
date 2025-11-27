@@ -76,13 +76,14 @@ def _fetch_and_cache(location: str, zip_code: str = None) -> Optional[LocationWe
         return None
 
 
-def get_weather(location: str = None, when: str = "now") -> str:
+def get_weather(location: str = None, when: str = "now", quick_mode: bool = False) -> str:
     """
     Get weather for a location.
 
     Args:
         location: Location name (e.g., "San Francisco", "Marin City")
         when: "now", "today", "tomorrow", "monday", "tuesday", etc., or day offset like "day 3"
+        quick_mode: If True, return brief response (e.g., "Sunny, 72°F")
 
     Returns:
         Natural language weather description
@@ -106,10 +107,15 @@ def get_weather(location: str = None, when: str = "now") -> str:
     try:
         # Current weather
         if when in ["now", "currently", "right now"]:
-            response = f"In {location}, it's {data.current_temp_f} degrees and {data.current_condition.lower()}"
-            if data.current_feels_like_f != data.current_temp_f:
-                response += f", feels like {data.current_feels_like_f}"
-            return response
+            if quick_mode:
+                # Quick mode: "Sunny, 72°F"
+                return f"{data.current_condition}, {data.current_temp_f}°F"
+            else:
+                # Detailed mode
+                response = f"In {location}, it's {data.current_temp_f} degrees and {data.current_condition.lower()}"
+                if data.current_feels_like_f != data.current_temp_f:
+                    response += f", feels like {data.current_feels_like_f}"
+                return response
 
         # Parse day offset
         day_offset = _parse_when(when)
@@ -124,7 +130,13 @@ def get_weather(location: str = None, when: str = "now") -> str:
 
         # Format response
         day_name = _get_day_name(day_offset)
-        return f"{day_name} in {location}: {forecast.condition.lower()}, high of {forecast.high_f}, low of {forecast.low_f}"
+
+        if quick_mode:
+            # Quick mode: "Sunny, high 78°F"
+            return f"{forecast.condition}, high {forecast.high_f}°F"
+        else:
+            # Detailed mode
+            return f"{day_name} in {location}: {forecast.condition.lower()}, high of {forecast.high_f}, low of {forecast.low_f}"
 
     except Exception as e:
         logger.error(f"Weather formatting error: {e}")
