@@ -1,9 +1,8 @@
 # Claude Code Configuration for Home Assistant AI Integration Project
 
-# Git operations
-Bash(git:*)
-Bash(git push:*)
-Bash(gh:*)
+# Git operations (blanket permissions for all git/gh commands)
+Bash(git *)
+Bash(gh *)
 
 # General bash commands
 Bash(*)
@@ -44,6 +43,10 @@ WebSearch
 WebFetch(domain:homeassistant.local)
 WebFetch(domain:www.home-assistant.io)
 WebFetch(domain:homeassistantapi.readthedocs.io)
+WebFetch(domain:wttr.in)
+WebFetch(domain:api.openweathermap.org)
+WebFetch(domain:claude.ai)
+WebFetch(domain:code.claude.com)
 
 # Common utilities
 Bash(curl:*)
