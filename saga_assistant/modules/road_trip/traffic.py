@@ -151,12 +151,12 @@ def _get_incidents_tomtom(route: Route, config: Dict) -> List[TrafficIncident]:
         # Create bounding box around route
         bbox = _create_bbox(route)
 
+        # TomTom Traffic Incidents API v5
         url = f"{config['base_url']}/traffic/services/5/incidentDetails"
 
         params = {
             'key': config['api_key'],
             'bbox': f"{bbox['min_lon']},{bbox['min_lat']},{bbox['max_lon']},{bbox['max_lat']}",
-            'fields': '{incidents{type,geometry{type,coordinates},properties{iconCategory,magnitudeOfDelay,events{description,code,iconCategory}}}}',
         }
 
         response = requests.get(url, params=params, timeout=config.get('timeout', 10))

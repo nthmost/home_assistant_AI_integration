@@ -64,17 +64,63 @@ class RoadTripHandler:
 
         return cls(home_location, unit_system)
 
-    def handle_query(self, query: str, quick_mode: bool = False) -> str:
+    def handle_query_with_destination(
+        self,
+        destination: str,
+        action_type: str,
+        quick_mode: bool = False,
+        original_query: Optional[str] = None
+    ) -> str:
+        """
+        Handle road trip query with pre-extracted destination (from LLM).
+
+        Args:
+            destination: Clean destination name (e.g., "Big Sur")
+            action_type: Action type (road_trip_distance, road_trip_time, etc.)
+            quick_mode: If True, return brief response
+            original_query: Original user query for context
+
+        Returns:
+            Response string
+        """
+        self._original_query = original_query or ""
+
+        try:
+            # Map action type to handler
+            if action_type == 'road_trip_distance':
+                return self._handle_distance_query({'destination': destination}, quick_mode)
+            elif action_type == 'road_trip_time':
+                return self._handle_travel_time_query({'destination': destination}, quick_mode)
+            elif action_type == 'road_trip_best_time':
+                return self._handle_best_departure_query({'destination': destination}, quick_mode)
+            elif action_type == 'road_trip_poi':
+                return self._handle_poi_query({'destination': destination}, quick_mode)
+            else:
+                return f"Unknown road trip action: {action_type}"
+
+        except GeocodingError as e:
+            return f"I couldn't find that location. Could you be more specific?"
+        except RoutingError as e:
+            return f"I couldn't calculate a route to that location."
+        except Exception as e:
+            logger.error(f"Error handling road trip query: {e}", exc_info=True)
+            return "Sorry, I encountered an error processing that request."
+
+    def handle_query(self, query: str, quick_mode: bool = False, original_query: Optional[str] = None) -> str:
         """
         Process a road trip query and generate response.
 
         Args:
             query: User's query text
             quick_mode: If True, return brief response
+            original_query: Original user query (for geocoding disambiguation)
 
         Returns:
             Response string
         """
+        # Store original query for geocoding
+        self._original_query = original_query or query
+
         try:
             # Parse query to determine intent and extract parameters
             intent = self._parse_intent(query)
@@ -148,13 +194,43 @@ class RoadTripHandler:
 
     def _extract_destination(self, query: str) -> str:
         """Extract destination from query."""
-        # Simple extraction - look for "to X" or last few words
-        to_idx = query.rfind(' to ')
-        if to_idx >= 0:
-            return query[to_idx + 4:].strip('?. ')
+        # Try to find destination using prepositions
+        # Look for patterns like "to X", "for X", but avoid "time to" or "best to"
+        prepositions = [' for ', ' to ', ' at ']
+        stop_words = ['time', 'best', 'leave', 'drive', 'go']
 
-        # Fallback: take last 2-3 words
+        best_match = None
+        best_idx = -1
+
+        for prep in prepositions:
+            idx = query.rfind(prep)
+            if idx > best_idx:
+                # Check if the word before the preposition is a stop word
+                words_before = query[:idx].strip().split()
+                if words_before and words_before[-1].lower() not in stop_words:
+                    continue  # Skip if not preceded by stop word
+
+                destination = query[idx + len(prep):].strip('?. ')
+                if destination:  # Must have something after the preposition
+                    best_match = destination
+                    best_idx = idx
+
+        if best_match:
+            # Remove time words from the end
+            time_words = ['tomorrow', 'today', 'tonight', 'morning', 'afternoon', 'evening']
+            dest_words = best_match.split()
+            while dest_words and dest_words[-1].lower() in time_words:
+                dest_words.pop()
+            if dest_words:
+                return ' '.join(dest_words)
+
+        # Fallback: take last 2-3 words (excluding time words)
         words = query.strip('?. ').split()
+        time_words = ['tomorrow', 'today', 'tonight', 'morning', 'afternoon', 'evening', 'now']
+        dest_words = [w for w in words if w.lower() not in time_words]
+        if dest_words:
+            return ' '.join(dest_words[-3:])
+
         return ' '.join(words[-3:])
 
     def _extract_departure_time(self, query: str) -> Optional[datetime]:
@@ -191,8 +267,8 @@ class RoadTripHandler:
         """Handle 'how far is the drive to X' queries."""
         destination = intent['destination']
 
-        # Geocode destination
-        dest_location = geocode(destination)
+        # Geocode destination (pass original query for disambiguation)
+        dest_location = geocode(destination, original_query=self._original_query)
 
         # Calculate route
         try:
@@ -212,13 +288,13 @@ class RoadTripHandler:
         if route.distance_miles < VERY_CLOSE_THRESHOLD_MILES:
             response_parts.append(f"That's just {route.format_distance(self.unit_system)} away - about {route.format_duration()}.")
         elif route.distance_miles > VERY_FAR_THRESHOLD_MILES:
-            response_parts.append(f"That's a long drive - {route.format_distance(self.unit_system)} to {dest_location.address}.")
+            response_parts.append(f"That's a long drive - {route.format_distance(self.unit_system)} to {dest_location.format_concise()}.")
             if route.duration_hours > MULTIDAY_TRIP_THRESHOLD_HOURS:
                 response_parts.append(f"About {route.format_duration()} of driving. Consider breaking it into multiple days.")
             else:
                 response_parts.append(f"About {route.format_duration()} of driving.")
         else:
-            response_parts.append(f"The drive to {dest_location.address} is {route.format_distance(self.unit_system)} {route.route_name}.")
+            response_parts.append(f"The drive to {dest_location.format_concise()} is {route.format_distance(self.unit_system)} {route.route_name}.")
             response_parts.append(f"Takes about {route.format_duration()}.")
 
         return " ".join(response_parts)
@@ -229,7 +305,7 @@ class RoadTripHandler:
         departure_time = intent.get('departure_time') or datetime.now()
 
         # Geocode
-        dest_location = geocode(destination)
+        dest_location = geocode(destination, original_query=self._original_query)
 
         # Calculate route
         try:
@@ -249,7 +325,7 @@ class RoadTripHandler:
 
         # Detailed mode
         response_parts = [
-            f"The drive to {dest_location.address} takes about {adjusted_route.format_duration()} {route.route_name}."
+            f"The drive to {dest_location.format_concise()} takes about {adjusted_route.format_duration()} {route.route_name}."
         ]
 
         # Add traffic info if meaningful
@@ -270,7 +346,7 @@ class RoadTripHandler:
         num_options = intent.get('num_options', 1)
 
         # Geocode
-        dest_location = geocode(destination)
+        dest_location = geocode(destination, original_query=self._original_query)
 
         # Find best departure time(s)
         options = find_best_departure_time(
@@ -291,7 +367,7 @@ class RoadTripHandler:
         # Detailed mode
         if num_options == 1:
             best = options[0]
-            response = f"The best time to leave for {dest_location.address} is {best.format_departure()}. "
+            response = f"The best time to leave for {dest_location.format_concise()} is {best.format_departure()}. "
             response += f"Travel time: {best.route.format_duration()} {best.route.route_name}. "
 
             if best.traffic_severity == 'light':
@@ -304,7 +380,7 @@ class RoadTripHandler:
             return response
         else:
             # Multiple options
-            response = f"Here are the best times to leave for {dest_location.address}:\n\n"
+            response = f"Here are the best times to leave for {dest_location.format_concise()}:\n\n"
 
             for i, option in enumerate(options, 1):
                 response += f"{i}. {option.format_departure().capitalize()} - "
@@ -319,7 +395,7 @@ class RoadTripHandler:
         departure_time = intent.get('departure_time') or datetime.now()
 
         # Geocode
-        dest_location = geocode(destination)
+        dest_location = geocode(destination, original_query=self._original_query)
 
         # Estimate arrival
         arrival_time, route = estimate_arrival_time(
@@ -344,7 +420,7 @@ class RoadTripHandler:
         destination = intent['destination']
 
         # Geocode
-        dest_location = geocode(destination)
+        dest_location = geocode(destination, original_query=self._original_query)
 
         # Calculate route
         try:
@@ -356,14 +432,14 @@ class RoadTripHandler:
         pois = find_pois_along_route(route, max_results=5)
 
         if not pois:
-            return f"I couldn't find any natural landmarks along the route to {dest_location.address}."
+            return f"I couldn't find any natural landmarks along the route to {dest_location.format_concise()}."
 
         # Quick mode: just names
         if quick_mode:
             return ", ".join([poi.name for poi in pois])
 
         # Detailed mode
-        response = f"Along the route to {dest_location.address}, you could stop at:\n\n"
+        response = f"Along the route to {dest_location.format_concise()}, you could stop at:\n\n"
 
         for i, poi in enumerate(pois, 1):
             response += f"{i}. {poi.format_description()}\n"

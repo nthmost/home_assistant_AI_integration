@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from saga_assistant.ha_client import HomeAssistantClient
 from saga_assistant.modules.road_trip import RoadTripHandler
 from saga_assistant.modules.road_trip.routing import Location, GeocodingError, RoutingError
+from saga_assistant.modules.road_trip.llm_extractor import LLMIntentExtractor
 
 logger = logging.getLogger(__name__)
 
@@ -115,8 +116,11 @@ class IntentParser:
             r"\b(miles to|kilometers to)\b",
         ],
         "road_trip_time": [
-            r"\b(how long|drive time|travel time|time to (get to|drive to|reach))\b",
+            r"\b(how long|drive time|travel time)\b",
+            r"\btime to\b",  # Broad match - let LLM figure out the rest
             r"\b(how long (will it take|does it take|is the drive))\b",
+            r"\b(what'?s|what is) the drive time\b",
+            r"\b(let'?s|lets) .{0,10}(drive time|travel time)\b",
         ],
         "road_trip_best_time": [
             r"\b(when should i leave|best time to leave|when (to|should i) depart)\b",
@@ -167,6 +171,9 @@ class IntentParser:
 
         # Initialize road trip handler
         self._road_trip_handler = self._init_road_trip_handler()
+
+        # Initialize LLM extractor for road trip queries
+        self._llm_extractor = None  # Lazy init
 
     def _init_road_trip_handler(self) -> RoadTripHandler:
         """Initialize the road trip handler.
@@ -220,6 +227,13 @@ class IntentParser:
             from saga_assistant.minnie_model import MinnieModel
             self._minnie_model = MinnieModel()
         return self._minnie_model
+
+    @property
+    def llm_extractor(self):
+        """Lazy-load LLM extractor for road trip queries"""
+        if self._llm_extractor is None:
+            self._llm_extractor = LLMIntentExtractor()
+        return self._llm_extractor
 
     def parse(self, text: str) -> Intent:
         """Parse natural language text into an intent.
@@ -526,7 +540,7 @@ class IntentParser:
         )
 
     def _parse_road_trip_intent(self, action: str, text: str, quick_mode: bool) -> Intent:
-        """Parse road trip planning intents.
+        """Parse road trip planning intents using LLM extraction.
 
         Args:
             action: Road trip action (road_trip_distance, road_trip_time, etc.)
@@ -536,30 +550,41 @@ class IntentParser:
         Returns:
             Road trip Intent
         """
+        # Use LLM to extract structured intent
+        llm_result = self.llm_extractor.extract_road_trip_intent(text)
+
         data = {"query": text}
-        confidence = 0.9  # High confidence for road trip actions
 
-        # Extract destination from common patterns
-        # "how far to LA", "how long is the drive to Big Sur", etc.
-        destination_patterns = [
-            r"to ([a-z\s]+?)(?:\?|$)",  # "to LA?", "to Big Sur"
-            r"is it to ([a-z\s]+?)(?:\?|$)",  # "is it to LA?"
-            r"the drive to ([a-z\s]+?)(?:\?|$)",  # "the drive to Big Sur"
-        ]
+        # Map LLM action to our action types (validate LLM output)
+        action_mapping = {
+            'distance': 'road_trip_distance',
+            'time': 'road_trip_time',
+            'best_time': 'road_trip_best_time',
+            'poi': 'road_trip_poi',
+        }
 
-        destination = None
-        for pattern in destination_patterns:
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                destination = match.group(1).strip()
-                break
-
-        if destination:
-            data['destination'] = destination
-            logger.info(f"Extracted destination: {destination}")
+        # If LLM action matches our detected action, use it
+        # Otherwise trust the regex-based broad detection
+        llm_action = action_mapping.get(llm_result.get('action'))
+        if llm_action == action:
+            # LLM agrees with broad detection
+            confidence = llm_result.get('confidence', 0.9)
         else:
-            confidence = 0.5
-            logger.warning(f"Could not extract destination from: {text}")
+            # LLM disagrees, but we still use its extraction
+            # Trust the broad detection more for action type
+            confidence = 0.7
+            logger.info(f"LLM action '{llm_result.get('action')}' differs from detected '{action}'")
+
+        # Always use LLM's destination and time extraction
+        if llm_result.get('destination'):
+            data['destination'] = llm_result['destination']
+            logger.info(f"LLM extracted destination: {llm_result['destination']}")
+        else:
+            confidence = min(confidence, 0.5)
+            logger.warning(f"LLM could not extract destination from: {text}")
+
+        if llm_result.get('departure_time'):
+            data['departure_time'] = llm_result['departure_time']
 
         logger.info(f"Parsed road trip intent: action={action}, quick_mode={quick_mode}, confidence={confidence:.2f}")
 
@@ -579,10 +604,19 @@ class IntentParser:
         Returns:
             Result dictionary with status and message
         """
-        query = intent.data.get('query', '')
+        # Use LLM-extracted destination directly instead of synthetic query
+        # This avoids handler re-parsing and breaking the clean extraction
+        destination = intent.data.get('destination')
+        original_query = intent.data.get('query', '')
 
         try:
-            response = self._road_trip_handler.handle_query(query, quick_mode=intent.quick_mode)
+            # Call handler with LLM-extracted data directly
+            response = self._road_trip_handler.handle_query_with_destination(
+                destination=destination,
+                action_type=intent.action,
+                quick_mode=intent.quick_mode,
+                original_query=original_query
+            )
             return {
                 "status": "success",
                 "message": response

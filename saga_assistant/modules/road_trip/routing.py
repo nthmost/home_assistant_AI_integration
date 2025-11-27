@@ -31,6 +31,37 @@ class Location:
         """Return (lat, lon) tuple."""
         return (self.latitude, self.longitude)
 
+    def format_concise(self) -> str:
+        """
+        Format location name concisely for voice output.
+
+        Removes verbose country names and unnecessary detail.
+        Examples:
+            "Big Sur, Monterey County, California, United States of America"
+            → "Big Sur in Monterey County, California"
+
+            "San Francisco, California, United States"
+            → "San Francisco, California"
+        """
+        if not self.address:
+            return "your destination"
+
+        # Split by commas
+        parts = [p.strip() for p in self.address.split(',')]
+
+        # Remove "United States of America" or "United States"
+        parts = [p for p in parts if p not in ['United States of America', 'United States', 'USA']]
+
+        # If we have 3+ parts (city, county, state), use "X in Y, Z" format
+        if len(parts) >= 3:
+            city = parts[0]
+            county_or_region = parts[1]
+            state = parts[2]
+            return f"{city} in {county_or_region}, {state}"
+
+        # Otherwise just join with commas
+        return ', '.join(parts[:3])  # Max 3 parts for brevity
+
 
 @dataclass
 class Route:
@@ -87,12 +118,13 @@ class RoutingError(Exception):
     pass
 
 
-def geocode(address: str) -> Location:
+def geocode(address: str, original_query: Optional[str] = None) -> Location:
     """
     Convert address to geographic coordinates.
 
     Args:
         address: Address string to geocode
+        original_query: Optional original user query for disambiguation
 
     Returns:
         Location object with coordinates
@@ -108,7 +140,7 @@ def geocode(address: str) -> Location:
     for api_name, api_config in enabled_apis:
         try:
             if api_name == 'nominatim':
-                return _geocode_nominatim(address, api_config)
+                return _geocode_nominatim(address, api_config, original_query)
         except Exception as e:
             logger.warning(f"Geocoding failed with {api_name}: {e}")
             continue
@@ -116,13 +148,13 @@ def geocode(address: str) -> Location:
     raise GeocodingError(f"Failed to geocode address: {address}")
 
 
-def _geocode_nominatim(address: str, config: Dict) -> Location:
-    """Geocode using Nominatim (OpenStreetMap)."""
+def _geocode_nominatim(address: str, config: Dict, original_query: Optional[str] = None) -> Location:
+    """Geocode using Nominatim (OpenStreetMap) with LLM disambiguation."""
     url = f"{config['base_url']}/search"
     params = {
         'q': address,
         'format': 'json',
-        'limit': 1,
+        'limit': 5,  # Get top 5 results for disambiguation
     }
     headers = {
         'User-Agent': 'SagaAssistant/1.0'  # Nominatim requires user agent
@@ -140,7 +172,15 @@ def _geocode_nominatim(address: str, config: Dict) -> Location:
     if not results:
         raise GeocodingError(f"No results found for: {address}")
 
+    # Nominatim ranks results by importance/relevance
+    # The first result is almost always what the user wants
+    # (e.g., "Big Sur" → California, not Kansas)
     result = results[0]
+
+    # Log if there were multiple options (for debugging)
+    if len(results) > 1:
+        logger.info(f"Geocoding '{address}' found {len(results)} results, using: {result.get('display_name')}")
+
     return Location(
         latitude=float(result['lat']),
         longitude=float(result['lon']),
