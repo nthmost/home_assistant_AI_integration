@@ -9,7 +9,8 @@ This project combines several components:
 1. **Light Effects Library** - Python library for creating dynamic, programmable light effects
 2. **Hardware Integrations** - Broadlink IR remotes, Govee lights, USB keypad control
 3. **Automations** - Wake-up lights, keypad shortcuts, and automated lighting scenes
-4. **Documentation** - Setup guides, troubleshooting docs, and device status tracking
+4. **Car Parker** - SF street-sweeping reminder. Flask API on loki + custom HA integration + dashboard. See [docs/car_parker.md](docs/car_parker.md).
+5. **Documentation** - Setup guides, troubleshooting docs, and device status tracking
 
 ## Quick Start
 
