@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Car Parker — SF</title>
+  <style>
+    :root {
+      --safe:   #1a7f4b;
+      --soon:   #c07800;
+      --urgent: #c0390b;
+      --now:    #8b0000;
+      --bg:     #0f1117;
+      --card:   #1a1d27;
+      --border: #2a2d3a;
+      --text:   #e8eaf0;
+      --muted:  #7a7d8a;
+      --accent: #4a90e2;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 1rem;
+    }
+    h1 {
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: var(--muted);
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      margin: 1rem 0 1.5rem;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 1rem;
+      padding: 1.5rem;
+      width: 100%;
+      max-width: 480px;
+      margin-bottom: 1rem;
+    }
+
+    /* ── Status banner ── */
+    #status-banner {
+      border-radius: 0.75rem;
+      padding: 1.25rem 1.5rem;
+      width: 100%;
+      max-width: 480px;
+      margin-bottom: 1rem;
+      text-align: center;
+    }
+    #status-banner.safe   { background: var(--safe);   color: #fff; }
+    #status-banner.soon   { background: var(--soon);   color: #fff; }
+    #status-banner.urgent { background: var(--urgent); color: #fff; }
+    #status-banner.now    { background: var(--now);    color: #fff; }
+    #status-banner.none   { background: var(--card);   border: 1px solid var(--border); }
+    #status-banner .big { font-size: 2rem; font-weight: 700; }
+    #status-banner .sub { font-size: 0.9rem; margin-top: 0.25rem; opacity: 0.85; }
+
+    /* ── Location detail ── */
+    .loc-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.75rem 1rem;
+    }
+    .loc-item .label {
+      color: var(--muted);
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .loc-item .value { font-weight: 500; font-size: 0.95rem; margin-top: 0.1rem; }
+    .loc-item.full { grid-column: 1 / -1; }
+
+    /* ── Time limit pill ── */
+    .time-limit-pill {
+      display: inline-block;
+      background: rgba(74,144,226,0.15);
+      border: 1px solid rgba(74,144,226,0.35);
+      color: #7ab8f5;
+      border-radius: 2rem;
+      padding: 0.3rem 0.85rem;
+      font-size: 0.85rem;
+      font-weight: 500;
+      margin-top: 0.5rem;
+    }
+    .time-limit-pill.rpp {
+      background: rgba(120,200,120,0.1);
+      border-color: rgba(120,200,120,0.3);
+      color: #8fdb8f;
+    }
+
+    /* ── Schedules list ── */
+    .schedule-item {
+      font-size: 0.85rem;
+      padding: 0.5rem 0;
+      border-bottom: 1px solid var(--border);
+      color: var(--muted);
+    }
+    .schedule-item:last-child { border-bottom: none; }
+    .schedule-item strong { color: var(--text); }
+
+    /* ── Buttons ── */
+    #btn-moved {
+      width: 100%;
+      max-width: 480px;
+      padding: 1rem;
+      font-size: 1rem;
+      font-weight: 600;
+      background: #333;
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 0.75rem;
+      cursor: pointer;
+      margin-bottom: 1rem;
+    }
+    #btn-moved:hover { background: #444; }
+
+    #btn-gps {
+      width: 100%;
+      max-width: 480px;
+      padding: 1.1rem;
+      font-size: 1.1rem;
+      font-weight: 700;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 0.75rem;
+      cursor: pointer;
+      margin-bottom: 0.75rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+    }
+    #btn-gps:hover { background: #3a80d2; }
+    #btn-gps:disabled { opacity: 0.6; cursor: default; }
+
+    /* ── Park form ── */
+    details {
+      width: 100%;
+      max-width: 480px;
+      margin-bottom: 1rem;
+    }
+    summary {
+      cursor: pointer;
+      color: var(--muted);
+      font-size: 0.85rem;
+      padding: 0.5rem 0;
+      list-style: none;
+      text-align: center;
+    }
+    summary::-webkit-details-marker { display: none; }
+    summary::before { content: '▶ '; font-size: 0.7rem; }
+    details[open] summary::before { content: '▼ '; }
+
+    .form-label {
+      display: block;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--muted);
+      margin-bottom: 0.35rem;
+    }
+    .form-group { margin-bottom: 1rem; }
+    input[type=text], select {
+      width: 100%;
+      padding: 0.65rem 0.9rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 0.5rem;
+      color: var(--text);
+      font-size: 1rem;
+    }
+    input[type=text]:focus, select:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+    select option { background: var(--card); }
+
+    /* autocomplete dropdown */
+    .autocomplete-wrap { position: relative; }
+    #street-suggestions {
+      position: absolute;
+      top: 100%;
+      left: 0; right: 0;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-top: none;
+      border-radius: 0 0 0.5rem 0.5rem;
+      max-height: 200px;
+      overflow-y: auto;
+      z-index: 100;
+      display: none;
+    }
+    #street-suggestions div {
+      padding: 0.6rem 0.9rem;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+    #street-suggestions div:hover, #street-suggestions div.active {
+      background: var(--border);
+    }
+
+    /* tabs */
+    .tabs { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
+    .tab {
+      flex: 1;
+      padding: 0.5rem;
+      text-align: center;
+      font-size: 0.85rem;
+      font-weight: 500;
+      border-radius: 0.5rem;
+      cursor: pointer;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      background: none;
+    }
+    .tab.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    #btn-park {
+      width: 100%;
+      padding: 0.85rem;
+      font-size: 1rem;
+      font-weight: 600;
+      background: #444;
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 0.75rem;
+      cursor: pointer;
+    }
+    #btn-park:hover { background: #555; }
+    #btn-park:disabled { opacity: 0.5; cursor: default; }
+
+    .error-msg {
+      color: #ff6b6b;
+      font-size: 0.85rem;
+      margin-top: 0.5rem;
+      display: none;
+    }
+
+    #loading { color: var(--muted); text-align: center; padding: 2rem; }
+  </style>
+</head>
+<body>
+  <h1>🚗 Car Parker SF</h1>
+
+  <div id="loading">Loading…</div>
+
+  <!-- Status banner -->
+  <div id="status-banner" style="display:none"></div>
+
+  <!-- Location detail card (shown when parked) -->
+  <div id="location-card" class="card" style="display:none">
+    <div class="loc-grid" id="location-detail"></div>
+  </div>
+
+  <!-- Schedules card (shown when parked) -->
+  <div id="schedules-card" class="card" style="display:none">
+    <div class="label" style="margin-bottom:0.75rem;font-size:0.75rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)">Street sweeping schedule</div>
+    <div id="schedules-list"></div>
+  </div>
+
+  <!-- Move button -->
+  <button id="btn-moved" style="display:none" onclick="clearParking()">✓ I moved my car</button>
+
+  <!-- GPS button (primary CTA when not parked) -->
+  <button id="btn-gps" style="display:none" onclick="parkByGPS()">
+    <span id="gps-icon">📍</span> I just parked here
+  </button>
+
+  <!-- Manual entry (collapsed) -->
+  <details id="manual-entry" style="display:none">
+    <summary>Enter location manually</summary>
+    <div class="card" style="margin-top:0.5rem">
+      <div class="tabs">
+        <button class="tab active" onclick="switchTab('text')">Type location</button>
+        <button class="tab" onclick="switchTab('picker')">Street picker</button>
+      </div>
+
+      <!-- Text tab -->
+      <div id="tab-text" class="tab-panel active">
+        <div class="form-group">
+          <label class="form-label">Where did you park?</label>
+          <input type="text" id="text-input" placeholder='e.g. "Anza between 7th and 8th"'
+            onkeydown="if(event.key==='Enter') parkFromText()">
+        </div>
+      </div>
+
+      <!-- Picker tab -->
+      <div id="tab-picker" class="tab-panel">
+        <div class="form-group">
+          <label class="form-label">Street</label>
+          <div class="autocomplete-wrap">
+            <input type="text" id="street-input" placeholder="Start typing street name…"
+              oninput="streetAutocomplete()" onkeydown="streetKeydown(event)" autocomplete="off">
+            <div id="street-suggestions"></div>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Block</label>
+          <select id="block-select" onchange="loadSides()">
+            <option value="">— select street first —</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Side of street</label>
+          <select id="side-select">
+            <option value="Unknown">— unknown —</option>
+          </select>
+        </div>
+      </div>
+
+      <button id="btn-park" onclick="park()">Save location</button>
+      <div class="error-msg" id="error-msg"></div>
+    </div>
+  </details>
+
+<script>
+let currentTab = 'text';
+let selectedStreet = '';
+let streetSuggestionsData = [];
+let activeSuggestion = -1;
+
+async function init() {
+  await refreshStatus();
+}
+
+async function refreshStatus() {
+  try {
+    const resp = await fetch('/api/status');
+    const data = await resp.json();
+    renderStatus(data);
+  } catch (e) {
+    document.getElementById('loading').textContent = 'Error loading status.';
+  }
+}
+
+// ── Render ────────────────────────────────────────────────────────────────
+
+function renderStatus(data) {
+  document.getElementById('loading').style.display = 'none';
+
+  const banner       = document.getElementById('status-banner');
+  const locationCard = document.getElementById('location-card');
+  const schedulesCard= document.getElementById('schedules-card');
+  const btnMoved     = document.getElementById('btn-moved');
+  const btnGPS       = document.getElementById('btn-gps');
+  const manualEntry  = document.getElementById('manual-entry');
+
+  banner.style.display = 'block';
+
+  if (!data.parked) {
+    banner.className = 'none';
+    banner.innerHTML = '<div class="big">Not parked</div><div class="sub">Tell me where you parked</div>';
+    locationCard.style.display = 'none';
+    schedulesCard.style.display = 'none';
+    btnMoved.style.display = 'none';
+    btnGPS.style.display = 'flex';
+    manualEntry.style.display = 'block';
+    return;
+  }
+
+  // ── Parked ──
+  btnGPS.style.display = 'none';
+  manualEntry.style.display = 'none';
+  btnMoved.style.display = 'block';
+
+  // Banner
+  const urgency = data.urgency || 'safe';
+  const sweep = data.next_sweeping;
+  banner.className = urgency;
+
+  const urgencyLabel = {
+    safe: '✓ Safe to park',
+    soon: '⚠ Move soon',
+    urgent: '⚡ Move now!',
+    now: '🚨 SWEEPING NOW'
+  }[urgency] || 'Parked';
+
+  const sweepSub = sweep
+    ? `Street sweeping ${sweep.when_label}`
+    : 'No upcoming sweeping found';
+
+  banner.innerHTML = `<div class="big">${urgencyLabel}</div><div class="sub">${sweepSub}</div>`;
+
+  // ── Location detail ──
+  const loc = data.location;
+  const parkedAgo = timeSince(data.saved_at);
+  let blockStr = loc.block_limits ? loc.block_limits.replace(/\s+-\s+/, ' – ') : '';
+
+  let detailHTML = '';
+
+  if (loc.street && loc.street !== 'Unknown') {
+    detailHTML += locItem('Street', loc.street);
+  }
+  if (blockStr) {
+    detailHTML += locItem('Block', blockStr);
+  }
+  if (loc.side && loc.side !== 'Unknown') {
+    detailHTML += locItem('Side', loc.side);
+  }
+  detailHTML += locItem('Parked', parkedAgo);
+
+  // Time limit
+  const tl = data.time_limit;
+  if (tl) {
+    let tlText = '';
+    if (tl.hrlimit && tl.hrlimit > 0) {
+      const h = Number.isInteger(tl.hrlimit) ? tl.hrlimit : tl.hrlimit;
+      tlText = `${h}-hr limit`;
+      if (tl.from_time && tl.to_time) tlText += ` ${tl.from_time}–${tl.to_time}`;
+      if (tl.days) tlText += ` ${tl.days}`;
+    } else if (tl.regulation) {
+      tlText = tl.regulation;
+    }
+    if (tlText) {
+      const rppClass = tl.rpp_exempt ? ' rpp' : '';
+      const rppNote = tl.rpp_exempt && tl.rpp_areas && tl.rpp_areas.length
+        ? ` · RPP ${tl.rpp_areas.join('/')} exempt` : '';
+      detailHTML += `<div class="loc-item full">
+        <div class="label">Parking limit</div>
+        <div><span class="time-limit-pill${rppClass}">${escHTML(tlText)}${rppNote}</span></div>
+      </div>`;
+    }
+  }
+
+  // Map link if we have GPS
+  if (data.lat && data.lng) {
+    const mapsUrl = `https://maps.apple.com/?ll=${data.lat},${data.lng}&z=17`;
+    detailHTML += `<div class="loc-item full">
+      <a href="${mapsUrl}" target="_blank" style="color:var(--accent);font-size:0.85rem">Open in Maps</a>
+    </div>`;
+  }
+
+  document.getElementById('location-detail').innerHTML = detailHTML;
+  locationCard.style.display = 'block';
+
+  // ── Schedules ──
+  const schedules = data.schedules || [];
+  if (schedules.length > 0) {
+    const items = schedules.map(s => {
+      const from = formatHour(s.fromhour);
+      const to = formatHour(s.tohour);
+      const weeks = weeksFromSchedule(s);
+      return `<div class="schedule-item">
+        <strong>${s.weekday} ${from}–${to}</strong>
+        ${weeks ? `(${weeks})` : ''}
+        — ${s.blockside} side
+      </div>`;
+    }).join('');
+    document.getElementById('schedules-list').innerHTML = items;
+    schedulesCard.style.display = 'block';
+  } else {
+    schedulesCard.style.display = 'none';
+  }
+}
+
+function locItem(label, value) {
+  return `<div class="loc-item"><div class="label">${label}</div><div class="value">${escHTML(String(value))}</div></div>`;
+}
+
+function weeksFromSchedule(s) {
+  const nums = [s.week1, s.week2, s.week3, s.week4, s.week5];
+  const labels = ['1st', '2nd', '3rd', '4th', '5th'];
+  return nums.map((v, i) => v ? labels[i] : null).filter(Boolean).join(', ');
+}
+
+function formatHour(h) {
+  const ampm = h < 12 ? 'am' : 'pm';
+  return `${h % 12 || 12}${ampm}`;
+}
+
+function timeSince(isoStr) {
+  if (!isoStr) return '';
+  const diff = Math.floor((Date.now() - new Date(isoStr)) / 1000);
+  if (diff < 60) return 'just now';
+  if (diff < 3600) return `${Math.floor(diff/60)} min ago`;
+  if (diff < 86400) return `${Math.floor(diff/3600)} hr ago`;
+  return `${Math.floor(diff/86400)} days ago`;
+}
+
+// ── GPS park ──────────────────────────────────────────────────────────────
+
+async function parkByGPS() {
+  if (!navigator.geolocation) {
+    showError('Geolocation not available — use manual entry below.');
+    return;
+  }
+  const btn = document.getElementById('btn-gps');
+  btn.disabled = true;
+  btn.innerHTML = '<span id="gps-icon">⏳</span> Getting location…';
+
+  navigator.geolocation.getCurrentPosition(
+    async (pos) => {
+      const { latitude: lat, longitude: lng } = pos.coords;
+      await dopark({ lat, lng });
+      btn.disabled = false;
+      btn.innerHTML = '<span id="gps-icon">📍</span> I just parked here';
+    },
+    (err) => {
+      btn.disabled = false;
+      btn.innerHTML = '<span id="gps-icon">📍</span> I just parked here';
+      showError('Could not get location. Use manual entry below.');
+    },
+    { enableHighAccuracy: true, timeout: 10000 }
+  );
+}
+
+// ── Manual park ───────────────────────────────────────────────────────────
+
+async function parkFromText() {
+  const text = document.getElementById('text-input').value.trim();
+  if (!text) return;
+  await dopark({ text });
+}
+
+async function park() {
+  if (currentTab === 'text') {
+    await parkFromText();
+  } else {
+    const street = selectedStreet;
+    const block = document.getElementById('block-select').value || null;
+    const side = document.getElementById('side-select').value || 'Unknown';
+    if (!street) { showError('Please select a street.'); return; }
+    await dopark({ street, block, side });
+  }
+}
+
+async function dopark(payload) {
+  hideError();
+  const btn = document.getElementById('btn-park');
+  if (btn) btn.disabled = true;
+  try {
+    const resp = await fetch('/api/park', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await resp.json();
+    if (!resp.ok) { showError(data.error || 'Something went wrong.'); return; }
+    document.getElementById('text-input').value = '';
+    renderStatus(data);
+  } catch (e) {
+    showError('Network error.');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function clearParking() {
+  await fetch('/api/clear', { method: 'POST' });
+  renderStatus({ parked: false });
+}
+
+// ── Tabs ──────────────────────────────────────────────────────────────────
+
+function switchTab(name) {
+  currentTab = name;
+  document.querySelectorAll('.tab').forEach((t, i) => {
+    t.classList.toggle('active', (i === 0 && name === 'text') || (i === 1 && name === 'picker'));
+  });
+  document.getElementById('tab-text').classList.toggle('active', name === 'text');
+  document.getElementById('tab-picker').classList.toggle('active', name === 'picker');
+}
+
+// ── Street autocomplete ───────────────────────────────────────────────────
+
+let acTimer;
+async function streetAutocomplete() {
+  clearTimeout(acTimer);
+  const q = document.getElementById('street-input').value.trim();
+  if (q.length < 2) { hideSuggestions(); return; }
+  acTimer = setTimeout(async () => {
+    const resp = await fetch('/api/streets?q=' + encodeURIComponent(q));
+    streetSuggestionsData = await resp.json();
+    activeSuggestion = -1;
+    renderSuggestions();
+  }, 200);
+}
+
+function renderSuggestions() {
+  const box = document.getElementById('street-suggestions');
+  if (!streetSuggestionsData.length) { hideSuggestions(); return; }
+  box.innerHTML = streetSuggestionsData.map(s =>
+    `<div onclick="selectStreet('${s.replace(/'/g, "\\'")}')">${escHTML(s)}</div>`
+  ).join('');
+  box.style.display = 'block';
+}
+
+function hideSuggestions() {
+  document.getElementById('street-suggestions').style.display = 'none';
+}
+
+function streetKeydown(e) {
+  const box = document.getElementById('street-suggestions');
+  const items = box.querySelectorAll('div');
+  if (e.key === 'ArrowDown') {
+    activeSuggestion = Math.min(activeSuggestion + 1, items.length - 1);
+    items.forEach((el, i) => el.classList.toggle('active', i === activeSuggestion));
+    e.preventDefault();
+  } else if (e.key === 'ArrowUp') {
+    activeSuggestion = Math.max(activeSuggestion - 1, 0);
+    items.forEach((el, i) => el.classList.toggle('active', i === activeSuggestion));
+    e.preventDefault();
+  } else if (e.key === 'Enter' && activeSuggestion >= 0) {
+    selectStreet(streetSuggestionsData[activeSuggestion]);
+    e.preventDefault();
+  } else if (e.key === 'Escape') {
+    hideSuggestions();
+  }
+}
+
+async function selectStreet(street) {
+  selectedStreet = street;
+  document.getElementById('street-input').value = street;
+  hideSuggestions();
+  const resp = await fetch('/api/blocks?street=' + encodeURIComponent(street));
+  const blocks = await resp.json();
+  const sel = document.getElementById('block-select');
+  sel.innerHTML = '<option value="">— any block —</option>' +
+    blocks.map(b => `<option value="${escAttr(b)}">${b.replace(/\s+-\s+/, ' – ')}</option>`).join('');
+  document.getElementById('side-select').innerHTML = '<option value="Unknown">— unknown —</option>';
+  await loadSides();
+}
+
+async function loadSides() {
+  const street = selectedStreet;
+  const block = document.getElementById('block-select').value || '';
+  let url = '/api/sides?street=' + encodeURIComponent(street);
+  if (block) url += '&block=' + encodeURIComponent(block);
+  const resp = await fetch(url);
+  const sides = await resp.json();
+  const sel = document.getElementById('side-select');
+  sel.innerHTML = '<option value="Unknown">— unknown —</option>' +
+    sides.map(s => `<option value="${escAttr(s)}">${escHTML(s)}</option>`).join('');
+}
+
+// ── Utilities ─────────────────────────────────────────────────────────────
+
+function showError(msg) {
+  const el = document.getElementById('error-msg');
+  if (el) { el.textContent = msg; el.style.display = 'block'; }
+}
+function hideError() {
+  const el = document.getElementById('error-msg');
+  if (el) el.style.display = 'none';
+}
+function escAttr(s) { return s.replace(/"/g, '&quot;'); }
+function escHTML(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+document.addEventListener('click', e => {
+  if (!e.target.closest('.autocomplete-wrap')) hideSuggestions();
+});
+
+init();
+</script>
+</body>
+</html>

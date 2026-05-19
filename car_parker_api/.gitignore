@@ -1,0 +1,7 @@
+venv/
+__pycache__/
+*.pyc
+data/street_sweeping_sf.json
+data/parking_regulations_sf.geojson
+data/parking_state.json
+data/sync_metadata.json
