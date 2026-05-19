@@ -75,7 +75,7 @@ def api_clear():
 
 @app.route('/api/park/tentative', methods=['POST'])
 def api_park_tentative():
-    """Capture GPS location and return candidate sides for confirmation."""
+    """Capture GPS, return nearby candidate blocks (stage=pick_block)."""
     data = request.get_json(force=True) or {}
     if 'lat' not in data or 'lng' not in data:
         return jsonify({'error': 'lat and lng required'}), 400
@@ -87,23 +87,45 @@ def api_park_tentative():
     tl = tl_lookup.find_nearest(lat, lng)
     time_limit = tl.to_dict() if tl else None
 
-    sweeping_records = sw_geo.find_nearest_records(lat, lng)
-    mgr.save_tentative(lat, lng, sweeping_records, time_limit)
+    nearby_blocks = sw_geo.find_nearby_blocks(lat, lng, max_blocks=5)
+    mgr.save_tentative(lat, lng, nearby_blocks, time_limit)
+    return jsonify(mgr.get_status())
+
+
+@app.route('/api/park/pick_block', methods=['POST'])
+def api_park_pick_block():
+    """Transition pending pick_block → pick_side by choosing a block."""
+    data = request.get_json(force=True) or {}
+    street = data.get('street')
+    limits = data.get('limits')
+    if not street:
+        return jsonify({'error': 'street required'}), 400
+
+    mgr = get_manager()
+    try:
+        result = mgr.pick_block(street, limits)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    if result is None:
+        return jsonify({'error': 'No pick_block stage to advance'}), 409
     return jsonify(mgr.get_status())
 
 
 @app.route('/api/park/confirm', methods=['POST'])
 def api_park_confirm():
-    """Finalize a pending park by locking in the chosen side."""
+    """Finalize a pending/pick_side park by locking in the chosen side."""
     data = request.get_json(force=True) or {}
     side = data.get('side')
     if not side:
         return jsonify({'error': 'side required'}), 400
 
     mgr = get_manager()
-    result = mgr.confirm_side(side)
+    try:
+        result = mgr.confirm_side(side)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
     if result is None:
-        return jsonify({'error': 'No pending park to confirm'}), 409
+        return jsonify({'error': 'No pick_side stage to confirm'}), 409
     return jsonify(mgr.get_status())
 
 

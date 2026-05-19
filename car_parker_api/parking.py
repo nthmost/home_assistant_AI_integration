@@ -230,14 +230,30 @@ class StreetSweepingLookup:
 # ── Text parsing ────────────────────────────────────────────────────────────
 
 class LocationParser:
+    # Matched after side has been extracted and stripped from the input.
+    # All patterns may emit `street`, `cross1`, `cross2`.
     PATTERNS = [
-        r'(?P<side>north|south|east|west)\s+side\s+of\s+(?P<street>[\w\s]+)'
-        r'\s+between\s+(?P<cross1>[\w\s]+)\s+and\s+(?P<cross2>[\w\s]+)',
-        r'(?P<street>[\w\s]+)\s+between\s+(?P<cross1>[\w\s]+)\s+and\s+(?P<cross2>[\w\s]+)',
+        # "X between Y and Z"
+        r'(?P<street>[\w\s]+?)\s+between\s+(?P<cross1>[\w\s]+?)\s+and\s+(?P<cross2>[\w\s]+?)\s*$',
+        # "on X near Y"
         r'on\s+(?P<street>[\w\s]+)\s+near\s+(?P<cross1>[\w\s]+)',
+        # "1234 X St"
         r'(?P<address>\d+)\s+(?P<street>[\w\s]+)',
+        # bare "X St" / "X Ave"
         r'(?:on\s+)?(?P<street>[\w\s]+?)\s+(?:street|st|avenue|ave|blvd|boulevard|drive|dr|road|rd)\b',
     ]
+
+    # Side appears as either:
+    #   "north side of ..."   (prefix form)
+    #   "..., north side"     (trailing, with or without "side", and with or
+    #                          without the comma)
+    SIDE_PREFIX_RE = re.compile(
+        r'\b(?P<side>north|south|east|west)\s+side\s+of\s+', re.IGNORECASE
+    )
+    SIDE_TRAILING_RE = re.compile(
+        r'[\s,]+(?:on\s+the\s+)?(?P<side>north|south|east|west)(?:\s+side)?\s*$',
+        re.IGNORECASE,
+    )
 
     def __init__(self, lookup: StreetSweepingLookup):
         self.lookup = lookup
@@ -253,21 +269,42 @@ class LocationParser:
         text = re.sub(r'\b(st|street)\b', 'St', text, flags=re.IGNORECASE)
         return text
 
+    def _extract_side(self, text: str) -> tuple[str, Optional[str]]:
+        """Pull the side phrase out of `text`. Returns (text_without_side, side_or_None)."""
+        m = self.SIDE_PREFIX_RE.search(text)
+        if m:
+            side = m.group('side').title()
+            text = text[:m.start()] + text[m.end():]
+            return text.strip(' ,'), side
+
+        m = self.SIDE_TRAILING_RE.search(text)
+        if m:
+            side = m.group('side').title()
+            text = text[:m.start()]
+            return text.strip(' ,'), side
+
+        return text, None
+
     def parse(self, location_text: str) -> Optional[ParkingLocation]:
-        location_text = location_text.lower().strip()
-        location_text = self.normalize_avenue_number(location_text)
+        raw = location_text
+        text = location_text.lower().strip()
+        text = self.normalize_avenue_number(text)
+        text, side = self._extract_side(text)
+
         for pattern in self.PATTERNS:
-            match = re.search(pattern, location_text, re.IGNORECASE)
+            match = re.search(pattern, text, re.IGNORECASE)
             if match:
-                return self._process_match(match, location_text)
+                return self._process_match(match, raw, side_override=side)
         return None
 
-    def _process_match(self, match, raw_input: str) -> Optional[ParkingLocation]:
+    def _process_match(
+        self, match, raw_input: str, side_override: Optional[str] = None
+    ) -> Optional[ParkingLocation]:
         data = match.groupdict()
         street = (data.get('street') or '').strip()
         cross1 = (data.get('cross1') or '').strip() or None
         cross2 = (data.get('cross2') or '').strip() or None
-        side = _normalize_side(data.get('side'))
+        side = _normalize_side(side_override)
 
         street_name = self.lookup.find_street(street)
         if not street_name:
@@ -275,10 +312,11 @@ class LocationParser:
 
         block_limits = None
         if cross1 and cross2:
-            cross1_norm = self.normalize_avenue_number(cross1)
-            cross2_norm = self.normalize_avenue_number(cross2)
+            cross1_norm = self.normalize_avenue_number(cross1).lower()
+            cross2_norm = self.normalize_avenue_number(cross2).lower()
             for block in self.lookup.get_all_blocks_for_street(street_name):
-                if cross1_norm in block and cross2_norm in block:
+                block_lc = block.lower()
+                if cross1_norm in block_lc and cross2_norm in block_lc:
                     block_limits = block
                     break
 
@@ -324,57 +362,104 @@ class ParkingManager:
         if self.state_file.exists():
             self.state_file.unlink()
 
-    # ── Save: tentative (GPS) ──
+    # ── Save: tentative (GPS) — two-stage flow ──
+    #
+    # Stage 1 (save_tentative): GPS captured → stage='pick_block' with a list
+    #   of nearby block candidates.
+    # Stage 2 (pick_block): user picks a block → stage='pick_side' with that
+    #   block's valid sides.
+    # Stage 3 (confirm_side): user picks a side → status='parked'.
 
     def save_tentative(
         self,
         lat: float,
         lng: float,
-        sweeping_records: List[Dict],
+        nearby_blocks: List[Dict],
         time_limit: Optional[Dict],
     ) -> Dict:
-        """Stash a pending state from a GPS fix; returns the new state."""
-        if sweeping_records:
-            r = sweeping_records[0]
-            candidate_block = {
-                'street': r['corridor'],
-                'limits': r.get('limits'),
-            }
-            candidate_sides = sorted({
-                rec.get('blockside', '').strip()
-                for rec in sweeping_records
-                if rec.get('blockside')
-            })
-        else:
-            candidate_block = None
-            candidate_sides = []
+        """Stash a pending state from a GPS fix.
 
+        `nearby_blocks` is a list of dicts shaped like
+        `{street, limits, sides, distance_m}` — usually from
+        SweepingGeoLookup.find_nearby_blocks().
+        """
         state = {
             'status': 'pending',
+            'stage': 'pick_block',
             'lat': lat,
             'lng': lng,
             'saved_at': now_local_iso(),
-            'candidate_block': candidate_block,
-            'candidate_sides': candidate_sides,
+            'candidates': nearby_blocks,
             'time_limit': time_limit,
         }
         self._write_state(state)
         return state
 
-    def confirm_side(self, side: str) -> Optional[Dict]:
-        """Promote a pending state to parked, locking in the chosen side.
+    def pick_block(self, street: str, limits: Optional[str]) -> Optional[Dict]:
+        """Transition pending state from pick_block → pick_side.
 
-        Returns the new state dict (status='parked'), or None if no pending
-        state exists.
+        Returns the new state, or None if not in pending/pick_block.
+        Raises ValueError if (street, limits) isn't among the candidates.
         """
         state = self.load_state()
-        if not state or state.get('status') != 'pending':
+        if (
+            not state
+            or state.get('status') != 'pending'
+            or state.get('stage') != 'pick_block'
+        ):
             return None
 
-        block = state.get('candidate_block') or {}
+        candidates = state.get('candidates') or []
+        match = next(
+            (
+                c for c in candidates
+                if c.get('street') == street and c.get('limits') == limits
+            ),
+            None,
+        )
+        if match is None:
+            choices = [f"{c.get('street')} / {c.get('limits')}" for c in candidates]
+            raise ValueError(
+                f"Block {street!r} / {limits!r} is not among the nearby "
+                f"candidates. Valid choices: {choices}"
+            )
+
+        state['stage'] = 'pick_side'
+        state['chosen_block'] = {
+            'street': match['street'],
+            'limits': match['limits'],
+        }
+        state['candidate_sides'] = list(match.get('sides') or [])
+        # Keep `candidates` around for back-out, but it's no longer the focus.
+        self._write_state(state)
+        return state
+
+    def confirm_side(self, side: str) -> Optional[Dict]:
+        """Promote a pending/pick_side state to parked.
+
+        Returns the new state (status='parked'), or None if not in
+        pending/pick_side. Raises ValueError if `side` is not valid for the
+        chosen block.
+        """
+        state = self.load_state()
+        if (
+            not state
+            or state.get('status') != 'pending'
+            or state.get('stage') != 'pick_side'
+        ):
+            return None
+
+        side_norm = _normalize_side(side)
+        valid = state.get('candidate_sides') or []
+        if valid and side_norm not in valid:
+            raise ValueError(
+                f"Side {side_norm!r} is not valid for this block. "
+                f"Valid sides: {', '.join(valid) or '(none)'}"
+            )
+
+        block = state.get('chosen_block') or {}
         street = block.get('street') or 'Unknown'
         limits = block.get('limits')
-        side_norm = _normalize_side(side)
 
         location = ParkingLocation(
             street=street,
@@ -501,10 +586,12 @@ class ParkingManager:
             'status': 'pending',
             'parked': False,
             'urgency': 'awaiting_side',
+            'stage': state.get('stage'),
             'lat': state.get('lat'),
             'lng': state.get('lng'),
             'saved_at': state.get('saved_at'),
-            'candidate_block': state.get('candidate_block'),
+            'candidates': state.get('candidates', []),
+            'chosen_block': state.get('chosen_block'),
             'candidate_sides': state.get('candidate_sides', []),
             'time_limit': state.get('time_limit'),
         }

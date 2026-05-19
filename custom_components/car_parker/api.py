@@ -38,6 +38,14 @@ class CarParkerApiClient:
             "POST", "/api/park/tentative", json={"lat": lat, "lng": lng}
         )
 
+    async def park_pick_block(
+        self, street: str, limits: Optional[str]
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {"street": street}
+        if limits is not None:
+            payload["limits"] = limits
+        return await self._request("POST", "/api/park/pick_block", json=payload)
+
     async def park_confirm(self, side: str) -> dict[str, Any]:
         return await self._request("POST", "/api/park/confirm", json={"side": side})
 

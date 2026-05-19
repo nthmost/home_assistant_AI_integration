@@ -72,8 +72,48 @@ def _get_time_limit(data: dict) -> str | None:
     return tl.get("regulation") or "Parking restriction"
 
 
+def _status_attrs(data: dict) -> dict[str, Any]:
+    # The status sensor carries the whole payload as attributes so the
+    # dashboard can pull stage/candidates/sides/etc. from a single place.
+    keep = (
+        "stage",
+        "lat",
+        "lng",
+        "saved_at",
+        "candidates",
+        "chosen_block",
+        "candidate_sides",
+        "time_limit",
+        "location",
+        "next_sweeping",
+    )
+    return {k: data[k] for k in keep if k in data}
+
+
+def _location_attrs(data: dict) -> dict[str, Any]:
+    loc = data.get("location") or {}
+    return {
+        "street": loc.get("street"),
+        "block_limits": loc.get("block_limits"),
+        "side": loc.get("side"),
+        "lat": data.get("lat"),
+        "lng": data.get("lng"),
+    }
+
+
+def _next_sweep_attrs(data: dict) -> dict[str, Any]:
+    sweep = data.get("next_sweeping") or {}
+    return {
+        "when_label": sweep.get("when_label"),
+        "weekday": sweep.get("weekday"),
+        "side": sweep.get("side"),
+        "end_iso": sweep.get("end_iso"),
+    }
+
+
 SENSORS: tuple[
-    tuple[SensorEntityDescription, Callable[[dict], Any]], ...
+    tuple[SensorEntityDescription, Callable[[dict], Any], Callable[[dict], dict] | None],
+    ...,
 ] = (
     (
         SensorEntityDescription(
@@ -82,6 +122,7 @@ SENSORS: tuple[
             icon="mdi:car-info",
         ),
         _get_status,
+        _status_attrs,
     ),
     (
         SensorEntityDescription(
@@ -90,6 +131,7 @@ SENSORS: tuple[
             icon="mdi:gauge",
         ),
         _get_urgency,
+        None,
     ),
     (
         SensorEntityDescription(
@@ -99,6 +141,7 @@ SENSORS: tuple[
             icon="mdi:broom",
         ),
         _get_next_sweep,
+        _next_sweep_attrs,
     ),
     (
         SensorEntityDescription(
@@ -107,6 +150,7 @@ SENSORS: tuple[
             icon="mdi:calendar-clock",
         ),
         _get_next_sweep_label,
+        None,
     ),
     (
         SensorEntityDescription(
@@ -115,6 +159,7 @@ SENSORS: tuple[
             icon="mdi:map-marker",
         ),
         _get_location,
+        _location_attrs,
     ),
     (
         SensorEntityDescription(
@@ -123,6 +168,7 @@ SENSORS: tuple[
             icon="mdi:timer-sand",
         ),
         _get_time_limit,
+        None,
     ),
 )
 
@@ -134,7 +180,8 @@ async def async_setup_entry(
 ) -> None:
     coordinator: CarParkerCoordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities(
-        CarParkerSensor(coordinator, entry, desc, fn) for desc, fn in SENSORS
+        CarParkerSensor(coordinator, entry, desc, fn, attrs_fn)
+        for desc, fn, attrs_fn in SENSORS
     )
 
 
@@ -147,12 +194,20 @@ class CarParkerSensor(CoordinatorEntity[CarParkerCoordinator], SensorEntity):
         entry: ConfigEntry,
         description: SensorEntityDescription,
         value_fn: Callable[[dict], Any],
+        attrs_fn: Callable[[dict], dict] | None,
     ):
         super().__init__(coordinator)
         self.entity_description = description
         self._value_fn = value_fn
+        self._attrs_fn = attrs_fn
         self._attr_unique_id = f"{entry.entry_id}_{description.key}"
 
     @property
     def native_value(self) -> Any:
         return self._value_fn(self.coordinator.data or {})
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        if self._attrs_fn is None:
+            return None
+        return self._attrs_fn(self.coordinator.data or {})

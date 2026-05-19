@@ -18,6 +18,7 @@ from .const import (
     ATTR_BLOCK,
     ATTR_ENTITY_ID,
     ATTR_LATITUDE,
+    ATTR_LIMITS,
     ATTR_LONGITUDE,
     ATTR_SIDE,
     ATTR_STREET,
@@ -28,6 +29,7 @@ from .const import (
     SERVICE_CONFIRM_SIDE,
     SERVICE_PARK_HERE,
     SERVICE_PARK_MANUAL,
+    SERVICE_PICK_BLOCK,
 )
 from .coordinator import CarParkerCoordinator
 
@@ -47,6 +49,13 @@ PARK_HERE_SCHEMA = vol.Schema(
         # or an entity to read coords from
         vol.Schema({vol.Required(ATTR_ENTITY_ID): cv.entity_id}),
     )
+)
+
+PICK_BLOCK_SCHEMA = vol.Schema(
+    {
+        vol.Required(ATTR_STREET): cv.string,
+        vol.Optional(ATTR_LIMITS): cv.string,
+    }
 )
 
 CONFIRM_SIDE_SCHEMA = vol.Schema(
@@ -135,7 +144,20 @@ def _register_services(hass: HomeAssistant) -> None:
             await coord.client.park_tentative(*coords)
         except CarParkerApiError as err:
             _LOGGER.error("park_here failed: %s", err)
-        await coord.async_request_refresh()
+        await coord.async_refresh()
+
+    async def _pick_block(call: ServiceCall) -> None:
+        coord = _any_coordinator(hass)
+        if not coord:
+            return
+        try:
+            await coord.client.park_pick_block(
+                street=call.data[ATTR_STREET],
+                limits=call.data.get(ATTR_LIMITS),
+            )
+        except CarParkerApiError as err:
+            _LOGGER.error("pick_block failed: %s", err)
+        await coord.async_refresh()
 
     async def _confirm_side(call: ServiceCall) -> None:
         coord = _any_coordinator(hass)
@@ -145,7 +167,7 @@ def _register_services(hass: HomeAssistant) -> None:
             await coord.client.park_confirm(call.data[ATTR_SIDE])
         except CarParkerApiError as err:
             _LOGGER.error("confirm_side failed: %s", err)
-        await coord.async_request_refresh()
+        await coord.async_refresh()
 
     async def _park_manual(call: ServiceCall) -> None:
         coord = _any_coordinator(hass)
@@ -163,7 +185,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 )
         except CarParkerApiError as err:
             _LOGGER.error("park_manual failed: %s", err)
-        await coord.async_request_refresh()
+        await coord.async_refresh()
 
     async def _clear(call: ServiceCall) -> None:
         coord = _any_coordinator(hass)
@@ -173,15 +195,22 @@ def _register_services(hass: HomeAssistant) -> None:
             await coord.client.clear()
         except CarParkerApiError as err:
             _LOGGER.error("clear failed: %s", err)
-        await coord.async_request_refresh()
+        await coord.async_refresh()
 
     hass.services.async_register(DOMAIN, SERVICE_PARK_HERE, _park_here, schema=PARK_HERE_SCHEMA)
+    hass.services.async_register(DOMAIN, SERVICE_PICK_BLOCK, _pick_block, schema=PICK_BLOCK_SCHEMA)
     hass.services.async_register(DOMAIN, SERVICE_CONFIRM_SIDE, _confirm_side, schema=CONFIRM_SIDE_SCHEMA)
     hass.services.async_register(DOMAIN, SERVICE_PARK_MANUAL, _park_manual, schema=PARK_MANUAL_SCHEMA)
     hass.services.async_register(DOMAIN, SERVICE_CLEAR, _clear)
 
 
 def _unregister_services(hass: HomeAssistant) -> None:
-    for svc in (SERVICE_PARK_HERE, SERVICE_CONFIRM_SIDE, SERVICE_PARK_MANUAL, SERVICE_CLEAR):
+    for svc in (
+        SERVICE_PARK_HERE,
+        SERVICE_PICK_BLOCK,
+        SERVICE_CONFIRM_SIDE,
+        SERVICE_PARK_MANUAL,
+        SERVICE_CLEAR,
+    ):
         if hass.services.has_service(DOMAIN, svc):
             hass.services.async_remove(DOMAIN, svc)

@@ -3,11 +3,12 @@
 DOMAIN = "car_parker"
 
 CONF_BASE_URL = "base_url"
-DEFAULT_BASE_URL = "http://loki.local:5050"
+DEFAULT_BASE_URL = "http://192.168.0.3:5050"  # loki LAN IP; mDNS doesn't work inside HA's aiohttp resolver
 DEFAULT_POLL_INTERVAL = 60  # seconds
 
 # Service names
 SERVICE_PARK_HERE = "park_here"
+SERVICE_PICK_BLOCK = "pick_block"
 SERVICE_CONFIRM_SIDE = "confirm_side"
 SERVICE_PARK_MANUAL = "park_manual"
 SERVICE_CLEAR = "clear"
@@ -20,6 +21,11 @@ ATTR_SIDE = "side"
 ATTR_TEXT = "text"
 ATTR_STREET = "street"
 ATTR_BLOCK = "block"
+ATTR_LIMITS = "limits"
+
+# Pending sub-stages
+STAGE_PICK_BLOCK = "pick_block"
+STAGE_PICK_SIDE = "pick_side"
 
 # Status values from the API
 STATUS_EMPTY = "empty"

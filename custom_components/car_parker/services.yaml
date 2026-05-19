@@ -34,9 +34,32 @@ park_here:
             - person
             - device_tracker
 
+pick_block:
+  name: Pick block
+  description: >
+    Advance a pending park from stage=pick_block to stage=pick_side by
+    choosing which nearby block you're actually on. The block must be one
+    of the candidates returned by /api/park/tentative.
+  fields:
+    street:
+      name: Street
+      description: Street name as returned in candidates.
+      required: true
+      example: 08th Ave
+      selector:
+        text:
+    limits:
+      name: Block limits
+      description: Cross-street limits as returned in candidates.
+      example: Geary Blvd  -  Anza St
+      selector:
+        text:
+
 confirm_side:
   name: Confirm side of street
-  description: Finalize a pending park by choosing the side of the street.
+  description: >
+    Finalize a pending park (stage=pick_side) by choosing the side of the
+    street. Must be one of the sides returned for the chosen block.
   fields:
     side:
       name: Side

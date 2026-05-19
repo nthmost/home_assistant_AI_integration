@@ -130,7 +130,9 @@ class TimeLimitInfo:
 class TimeLimitLookup:
     """Looks up time-limit parking rules nearest to a GPS point."""
 
-    MAX_DISTANCE_M = 80  # ignore matches farther than this
+    # Tight threshold: a regulation on the curb you're at should be within
+    # ~10m (GPS noise) + a couple meters slop. 80m+ leaks across streets.
+    MAX_DISTANCE_M = 25
 
     def __init__(self, geojson_file: Optional[Path] = None):
         self.geojson_file = geojson_file or REGULATIONS_FILE
@@ -257,3 +259,54 @@ class SweepingGeoLookup:
         candidates.sort(key=lambda x: x[0])
         nearest_cnn = candidates[0][1].get("cnn")
         return [r for d, r in candidates if r.get("cnn") == nearest_cnn]
+
+    def find_nearby_blocks(
+        self, lat: float, lng: float, max_blocks: int = 5
+    ) -> List[Dict]:
+        """Return up to max_blocks nearest blocks (street+limits), each with
+        an aggregated list of sides found in the sweeping data.
+
+        Each block dict:
+          {
+            "street": "08th Ave",
+            "limits": "Geary Blvd  -  Anza St",
+            "sides": ["East", "West"],
+            "distance_m": 12,
+          }
+        Sorted by ascending distance.
+        """
+        scored: List[Tuple[float, Dict]] = []
+        for feat in self._features:
+            mlng, mlat = feat["midpoint"]
+            coarse = _dist_m(lat, lng, mlat, mlng)
+            if coarse > self.MAX_DISTANCE_M * 3:
+                continue
+            d = _nearest_dist_to_linestring(lng, lat, feat["coords"])
+            if d <= self.MAX_DISTANCE_M:
+                scored.append((d, feat["record"]))
+
+        if not scored:
+            return []
+
+        scored.sort(key=lambda x: x[0])
+
+        # Aggregate by (street, limits). First-seen distance wins (smallest).
+        by_block: Dict[Tuple, Dict[str, Any]] = {}
+        for dist, rec in scored:
+            key = (rec.get("corridor"), rec.get("limits"))
+            entry = by_block.get(key)
+            side = (rec.get("blockside") or "").strip()
+            if entry is None:
+                by_block[key] = {
+                    "street": rec.get("corridor"),
+                    "limits": rec.get("limits"),
+                    "sides": {side} if side else set(),
+                    "distance_m": round(dist),
+                }
+            elif side:
+                entry["sides"].add(side)
+
+        result = sorted(by_block.values(), key=lambda b: b["distance_m"])[:max_blocks]
+        for b in result:
+            b["sides"] = sorted(b["sides"])
+        return result
