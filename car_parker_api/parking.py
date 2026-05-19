@@ -1,17 +1,22 @@
 #!/usr/bin/env python3
 """
 SF Parking and Street Sweeping lookup.
-Adapted from saga_assistant/parking.py (home_assistant_AI_integration project).
+
+State model (parking_state.json):
+  absent file                            — empty (not parked)
+  {"status": "pending", ...}             — GPS captured, awaiting side confirmation
+  {"status": "parked", ...}              — fully confirmed
 """
 
 import json
 import logging
 import re
 from dataclasses import dataclass, asdict
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
-from typing import List, Optional, Dict, Tuple
+from datetime import datetime, timedelta
 from difflib import get_close_matches
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
 
@@ -19,17 +24,18 @@ DATA_DIR = Path(__file__).parent / "data"
 SWEEPING_DATA_FILE = DATA_DIR / "street_sweeping_sf.json"
 PARKING_STATE_FILE = DATA_DIR / "parking_state.json"
 
+# All SFMTA times are local clock time; we anchor here so DST is correct.
+LOCAL_TZ = ZoneInfo("America/Los_Angeles")
+
 WEEK_FIELDS = ['week1', 'week2', 'week3', 'week4', 'week5']
 
-WEEKDAY_MAP = {
-    'Monday': 'Mon', 'Mon': 'Mon',
-    'Tuesday': 'Tue', 'Tue': 'Tue',
-    'Wednesday': 'Wed', 'Wed': 'Wed',
-    'Thursday': 'Thu', 'Thu': 'Thu',
-    'Friday': 'Fri', 'Fri': 'Fri',
-    'Saturday': 'Sat', 'Sat': 'Sat',
-    'Sunday': 'Sun', 'Sun': 'Sun',
-}
+
+def now_local() -> datetime:
+    return datetime.now(LOCAL_TZ)
+
+
+def now_local_iso() -> str:
+    return now_local().isoformat()
 
 
 def ordinal(n: int) -> str:
@@ -39,6 +45,15 @@ def ordinal(n: int) -> str:
         suffix = {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')
     return f"{n}{suffix}"
 
+
+def _normalize_side(side: Optional[str]) -> str:
+    if not side:
+        return "Unknown"
+    s = side.strip().title()
+    return s or "Unknown"
+
+
+# ── Dataclasses ─────────────────────────────────────────────────────────────
 
 @dataclass
 class ParkingLocation:
@@ -68,23 +83,23 @@ class SweepingSchedule:
     holidays: bool
 
     def applies_to_date(self, date: datetime) -> bool:
-        day_name = date.strftime('%a')
-        if day_name != self.weekday:
+        if date.strftime('%a') != self.weekday:
             return False
-        week_of_month = (date.day - 1) // 7 + 1
-        week_applies = [self.week1, self.week2, self.week3, self.week4, self.week5]
-        if week_of_month > 5:
-            week_of_month = 5
-        return week_applies[week_of_month - 1]
+        week_of_month = min(5, (date.day - 1) // 7 + 1)
+        weeks = [self.week1, self.week2, self.week3, self.week4, self.week5]
+        return weeks[week_of_month - 1]
 
     def get_datetime_range(self, date: datetime) -> Tuple[datetime, datetime]:
+        # Preserve tz from `date`; SFMTA hours are local clock time.
         start = date.replace(hour=self.fromhour, minute=0, second=0, microsecond=0)
         end = date.replace(hour=self.tohour, minute=0, second=0, microsecond=0)
         return start, end
 
     def weeks_description(self) -> str:
         weeks = []
-        for i, applies in enumerate([self.week1, self.week2, self.week3, self.week4, self.week5], 1):
+        for i, applies in enumerate(
+            [self.week1, self.week2, self.week3, self.week4, self.week5], 1
+        ):
             if applies:
                 weeks.append(ordinal(i))
         return ', '.join(weeks)
@@ -103,6 +118,8 @@ class SweepingSchedule:
         }
 
 
+# ── Sweeping data lookup ────────────────────────────────────────────────────
+
 class StreetSweepingLookup:
     def __init__(self, data_file: Optional[Path] = None):
         self.data_file = data_file or SWEEPING_DATA_FILE
@@ -120,10 +137,10 @@ class StreetSweepingLookup:
             self.data = json.load(f)
         for record in self.data:
             street = record['corridor']
-            if street not in self.street_index:
-                self.street_index[street] = []
-            self.street_index[street].append(record)
-        logger.info(f"Loaded {len(self.data)} records covering {len(self.street_index)} streets")
+            self.street_index.setdefault(street, []).append(record)
+        logger.info(
+            f"Loaded {len(self.data)} records covering {len(self.street_index)} streets"
+        )
 
     def get_street_names(self) -> List[str]:
         return sorted(self.street_index.keys())
@@ -136,40 +153,41 @@ class StreetSweepingLookup:
             candidate = street_query + suffix
             if candidate in self.street_index:
                 return candidate
-        matches = get_close_matches(street_query, self.street_index.keys(), n=3, cutoff=0.6)
-        if matches:
-            return matches[0]
-        return None
+        matches = get_close_matches(
+            street_query, self.street_index.keys(), n=3, cutoff=0.6
+        )
+        return matches[0] if matches else None
 
     def find_streets_prefix(self, prefix: str, limit: int = 20) -> List[str]:
-        """Return streets starting with prefix (case-insensitive), for autocomplete."""
-        import re
         prefix = prefix.strip().lower()
         # Also try zero-padded form: "9th" -> "09th"
-        padded = re.sub(r'^(\d)(st|nd|rd|th)', lambda m: f'0{m.group(1)}{m.group(2)}', prefix)
-        results = [s for s in self.get_street_names()
-                   if s.lower().startswith(prefix) or (padded != prefix and s.lower().startswith(padded))]
+        padded = re.sub(
+            r'^(\d)(st|nd|rd|th)', lambda m: f'0{m.group(1)}{m.group(2)}', prefix
+        )
+        results = [
+            s for s in self.get_street_names()
+            if s.lower().startswith(prefix)
+            or (padded != prefix and s.lower().startswith(padded))
+        ]
         return results[:limit]
 
-    def get_valid_sides(self, street: str, block_limits: Optional[str] = None) -> List[str]:
+    def get_valid_sides(
+        self, street: str, block_limits: Optional[str] = None
+    ) -> List[str]:
         street_name = self.find_street(street)
         if not street_name:
             return []
         records = self.street_index.get(street_name, [])
         if block_limits:
             records = [r for r in records if r['limits'] == block_limits]
-        sides = set()
-        for record in records:
-            side = record.get('blockside', '').strip()
-            if side:
-                sides.add(side)
-        return sorted(list(sides))
+        sides = {r.get('blockside', '').strip() for r in records if r.get('blockside')}
+        return sorted(sides)
 
     def lookup_schedule(
         self,
         street: str,
         block_limits: Optional[str] = None,
-        side: Optional[str] = None
+        side: Optional[str] = None,
     ) -> List[SweepingSchedule]:
         street_name = self.find_street(street)
         if not street_name:
@@ -178,37 +196,43 @@ class StreetSweepingLookup:
         if block_limits:
             records = [r for r in records if r['limits'] == block_limits]
         if side and side.lower() != 'unknown':
-            records = [r for r in records if r.get('blockside', '').lower() == side.lower()]
-        schedules = []
-        for r in records:
-            schedules.append(SweepingSchedule(
-                corridor=r['corridor'],
-                limits=r['limits'],
-                blockside=r['blockside'],
-                weekday=r['weekday'],
-                fullname=r['fullname'],
-                fromhour=int(r['fromhour']),
-                tohour=int(r['tohour']),
-                week1=bool(int(r['week1'])),
-                week2=bool(int(r['week2'])),
-                week3=bool(int(r['week3'])),
-                week4=bool(int(r['week4'])),
-                week5=bool(int(r['week5'])),
-                holidays=bool(int(r['holidays']))
-            ))
-        return schedules
+            records = [
+                r for r in records
+                if r.get('blockside', '').lower() == side.lower()
+            ]
+        return [self._record_to_schedule(r) for r in records]
+
+    @staticmethod
+    def _record_to_schedule(r: Dict) -> SweepingSchedule:
+        return SweepingSchedule(
+            corridor=r['corridor'],
+            limits=r['limits'],
+            blockside=r['blockside'],
+            weekday=r['weekday'],
+            fullname=r['fullname'],
+            fromhour=int(r['fromhour']),
+            tohour=int(r['tohour']),
+            week1=bool(int(r['week1'])),
+            week2=bool(int(r['week2'])),
+            week3=bool(int(r['week3'])),
+            week4=bool(int(r['week4'])),
+            week5=bool(int(r['week5'])),
+            holidays=bool(int(r['holidays'])),
+        )
 
     def get_all_blocks_for_street(self, street: str) -> List[str]:
         street_name = self.find_street(street)
         if not street_name:
             return []
-        records = self.street_index.get(street_name, [])
-        return sorted(set(r['limits'] for r in records))
+        return sorted({r['limits'] for r in self.street_index.get(street_name, [])})
 
+
+# ── Text parsing ────────────────────────────────────────────────────────────
 
 class LocationParser:
     PATTERNS = [
-        r'(?P<side>north|south|east|west)\s+side\s+of\s+(?P<street>[\w\s]+)\s+between\s+(?P<cross1>[\w\s]+)\s+and\s+(?P<cross2>[\w\s]+)',
+        r'(?P<side>north|south|east|west)\s+side\s+of\s+(?P<street>[\w\s]+)'
+        r'\s+between\s+(?P<cross1>[\w\s]+)\s+and\s+(?P<cross2>[\w\s]+)',
         r'(?P<street>[\w\s]+)\s+between\s+(?P<cross1>[\w\s]+)\s+and\s+(?P<cross2>[\w\s]+)',
         r'on\s+(?P<street>[\w\s]+)\s+near\s+(?P<cross1>[\w\s]+)',
         r'(?P<address>\d+)\s+(?P<street>[\w\s]+)',
@@ -223,6 +247,7 @@ class LocationParser:
             num = match.group(1)
             suffix = match.group(2)
             return f"{int(num):02d}{suffix}"
+
         text = re.sub(r'\b(\d{1,2})(st|nd|rd|th)\b', pad_number, text, flags=re.IGNORECASE)
         text = re.sub(r'\b(ave|avenue)\b', 'Ave', text, flags=re.IGNORECASE)
         text = re.sub(r'\b(st|street)\b', 'St', text, flags=re.IGNORECASE)
@@ -239,10 +264,10 @@ class LocationParser:
 
     def _process_match(self, match, raw_input: str) -> Optional[ParkingLocation]:
         data = match.groupdict()
-        street = data.get('street', '').strip()
-        cross1 = data.get('cross1', '').strip() if 'cross1' in data else None
-        cross2 = data.get('cross2', '').strip() if 'cross2' in data else None
-        side = data.get('side', '').strip().title() if 'side' in data else None
+        street = (data.get('street') or '').strip()
+        cross1 = (data.get('cross1') or '').strip() or None
+        cross2 = (data.get('cross2') or '').strip() or None
+        side = _normalize_side(data.get('side'))
 
         street_name = self.lookup.find_street(street)
         if not street_name:
@@ -252,8 +277,7 @@ class LocationParser:
         if cross1 and cross2:
             cross1_norm = self.normalize_avenue_number(cross1)
             cross2_norm = self.normalize_avenue_number(cross2)
-            all_blocks = self.lookup.get_all_blocks_for_street(street_name)
-            for block in all_blocks:
+            for block in self.lookup.get_all_blocks_for_street(street_name):
                 if cross1_norm in block and cross2_norm in block:
                     block_limits = block
                     break
@@ -262,179 +286,287 @@ class LocationParser:
             street=street_name,
             cross_street_1=cross1,
             cross_street_2=cross2,
-            side=side or "Unknown",
+            side=side,
             block_limits=block_limits,
-            timestamp=datetime.now(timezone.utc).isoformat(),
-            raw_input=raw_input
+            timestamp=now_local_iso(),
+            raw_input=raw_input,
         )
 
 
+# ── Parking manager ─────────────────────────────────────────────────────────
+
 class ParkingManager:
-    def __init__(self, lookup: StreetSweepingLookup, state_file: Optional[Path] = None):
+    """Owns the parking_state.json file and computes status."""
+
+    def __init__(
+        self,
+        lookup: StreetSweepingLookup,
+        state_file: Optional[Path] = None,
+    ):
         self.lookup = lookup
         self.state_file = state_file or PARKING_STATE_FILE
         self.state_file.parent.mkdir(parents=True, exist_ok=True)
         self.parser = LocationParser(lookup)
 
-    def save_parking_location(self, location: ParkingLocation, extra: Optional[Dict] = None):
-        schedules = self.lookup.lookup_schedule(
-            location.street,
-            location.block_limits,
-            location.side
-        )
-        state = {
-            'location': asdict(location),
-            'schedules': [asdict(s) for s in schedules],
-            'saved_at': datetime.now(timezone.utc).isoformat(),
-            'time_limit': (extra or {}).get('time_limit'),
-            'lat': (extra or {}).get('lat'),
-            'lng': (extra or {}).get('lng'),
-        }
+    # ── State I/O ──
+
+    def _write_state(self, state: Dict):
         with open(self.state_file, 'w') as f:
             json.dump(state, f, indent=2)
 
-    def save_gps_location(self, lat: float, lng: float, time_limit: Optional[Dict]):
-        """Save a GPS-only location when no sweeping record was found nearby."""
-        state = {
-            'location': {
-                'street': 'Unknown',
-                'cross_street_1': None,
-                'cross_street_2': None,
-                'side': 'Unknown',
-                'block_limits': None,
-                'timestamp': datetime.now(timezone.utc).isoformat(),
-                'raw_input': f'GPS {lat:.5f},{lng:.5f}',
-            },
-            'schedules': [],
-            'saved_at': datetime.now(timezone.utc).isoformat(),
-            'time_limit': time_limit,
-            'lat': lat,
-            'lng': lng,
-        }
-        with open(self.state_file, 'w') as f:
-            json.dump(state, f, indent=2)
-
-    def save_structured_location(self, street: str, block_limits: Optional[str], side: str):
-        """Save from structured form data (street dropdown + block dropdown + side)."""
-        schedules = self.lookup.lookup_schedule(street, block_limits, side)
-        location = ParkingLocation(
-            street=street,
-            cross_street_1=None,
-            cross_street_2=None,
-            side=side,
-            block_limits=block_limits,
-            timestamp=datetime.now(timezone.utc).isoformat(),
-            raw_input=f"{street} {block_limits or ''} {side} side"
-        )
-        state = {
-            'location': asdict(location),
-            'schedules': [asdict(s) for s in schedules],
-            'saved_at': datetime.now(timezone.utc).isoformat()
-        }
-        with open(self.state_file, 'w') as f:
-            json.dump(state, f, indent=2)
-
-    def clear_parking(self):
-        if self.state_file.exists():
-            self.state_file.unlink()
-
-    def load_parking_state(self) -> Optional[Dict]:
+    def load_state(self) -> Optional[Dict]:
         if not self.state_file.exists():
             return None
         with open(self.state_file, 'r') as f:
             return json.load(f)
 
-    def get_next_sweeping(self, days_ahead: int = 14) -> Optional[Dict]:
-        state = self.load_parking_state()
-        if not state:
-            return None
-        schedules_data = state.get('schedules', [])
-        if not schedules_data:
+    def clear(self):
+        if self.state_file.exists():
+            self.state_file.unlink()
+
+    # ── Save: tentative (GPS) ──
+
+    def save_tentative(
+        self,
+        lat: float,
+        lng: float,
+        sweeping_records: List[Dict],
+        time_limit: Optional[Dict],
+    ) -> Dict:
+        """Stash a pending state from a GPS fix; returns the new state."""
+        if sweeping_records:
+            r = sweeping_records[0]
+            candidate_block = {
+                'street': r['corridor'],
+                'limits': r.get('limits'),
+            }
+            candidate_sides = sorted({
+                rec.get('blockside', '').strip()
+                for rec in sweeping_records
+                if rec.get('blockside')
+            })
+        else:
+            candidate_block = None
+            candidate_sides = []
+
+        state = {
+            'status': 'pending',
+            'lat': lat,
+            'lng': lng,
+            'saved_at': now_local_iso(),
+            'candidate_block': candidate_block,
+            'candidate_sides': candidate_sides,
+            'time_limit': time_limit,
+        }
+        self._write_state(state)
+        return state
+
+    def confirm_side(self, side: str) -> Optional[Dict]:
+        """Promote a pending state to parked, locking in the chosen side.
+
+        Returns the new state dict (status='parked'), or None if no pending
+        state exists.
+        """
+        state = self.load_state()
+        if not state or state.get('status') != 'pending':
             return None
 
-        schedules = [SweepingSchedule(**s) for s in schedules_data]
-        now = datetime.now()
+        block = state.get('candidate_block') or {}
+        street = block.get('street') or 'Unknown'
+        limits = block.get('limits')
+        side_norm = _normalize_side(side)
+
+        location = ParkingLocation(
+            street=street,
+            cross_street_1=None,
+            cross_street_2=None,
+            side=side_norm,
+            block_limits=limits,
+            timestamp=now_local_iso(),
+            raw_input=f"GPS confirmed {side_norm} side",
+        )
+        self._save_parked(
+            location,
+            extra={
+                'time_limit': state.get('time_limit'),
+                'lat': state.get('lat'),
+                'lng': state.get('lng'),
+            },
+        )
+        return self.load_state()
+
+    # ── Save: direct paths (text, structured) ──
+
+    def save_parking_location(
+        self, location: ParkingLocation, extra: Optional[Dict] = None
+    ):
+        self._save_parked(location, extra)
+
+    def save_structured_location(
+        self, street: str, block_limits: Optional[str], side: str
+    ):
+        side_norm = _normalize_side(side)
+        location = ParkingLocation(
+            street=street,
+            cross_street_1=None,
+            cross_street_2=None,
+            side=side_norm,
+            block_limits=block_limits,
+            timestamp=now_local_iso(),
+            raw_input=f"{street} {block_limits or ''} {side_norm} side",
+        )
+        self._save_parked(location)
+
+    def _save_parked(
+        self, location: ParkingLocation, extra: Optional[Dict] = None
+    ):
+        extra = extra or {}
+        schedules = self.lookup.lookup_schedule(
+            location.street, location.block_limits, location.side
+        )
+        state = {
+            'status': 'parked',
+            'location': asdict(location),
+            'schedules': [asdict(s) for s in schedules],
+            'saved_at': now_local_iso(),
+            'time_limit': extra.get('time_limit'),
+            'lat': extra.get('lat'),
+            'lng': extra.get('lng'),
+        }
+        self._write_state(state)
+
+    # ── Read: next sweeping event ──
+
+    def get_next_sweeping(
+        self, state: Optional[Dict] = None, days_ahead: int = 14
+    ) -> Optional[Dict]:
+        state = state or self.load_state()
+        if not state or state.get('status') != 'parked':
+            return None
+
+        schedules = [SweepingSchedule(**s) for s in state.get('schedules', [])]
+        if not schedules:
+            return None
+
+        now = now_local()
         next_event = None
 
         for day_offset in range(days_ahead):
             check_date = now + timedelta(days=day_offset)
             for schedule in schedules:
-                if schedule.applies_to_date(check_date):
-                    start_time, end_time = schedule.get_datetime_range(check_date)
-                    if end_time < now:
-                        continue
-                    if next_event is None or start_time < next_event['start_time']:
-                        next_event = {
-                            'schedule': schedule,
-                            'date': check_date,
-                            'start_time': start_time,
-                            'end_time': end_time,
-                        }
+                if not schedule.applies_to_date(check_date):
+                    continue
+                start_time, end_time = schedule.get_datetime_range(check_date)
+                if end_time < now:
+                    continue
+                if next_event is None or start_time < next_event['start_time']:
+                    next_event = {
+                        'schedule': schedule,
+                        'date': check_date,
+                        'start_time': start_time,
+                        'end_time': end_time,
+                    }
             if next_event:
                 break  # stop at first day that has an event
 
         return next_event
 
+    # ── Status (the main API consumer) ──
+
     def get_status(self) -> Dict:
-        """Return full status dict for the API."""
-        state = self.load_parking_state()
+        state = self.load_state()
         if not state:
-            return {'parked': False}
+            return self._status_empty()
 
-        location = state['location']
-        next_sweep = self.get_next_sweeping()
+        status_kind = state.get('status')
+        if status_kind == 'pending':
+            return self._status_pending(state)
+        if status_kind == 'parked':
+            return self._status_parked(state)
 
+        logger.warning(f"Unknown state.status={status_kind!r}; reporting empty")
+        return self._status_empty()
+
+    @staticmethod
+    def _status_empty() -> Dict:
+        return {
+            'status': 'empty',
+            'parked': False,
+            'urgency': 'safe',
+        }
+
+    @staticmethod
+    def _status_pending(state: Dict) -> Dict:
+        return {
+            'status': 'pending',
+            'parked': False,
+            'urgency': 'awaiting_side',
+            'lat': state.get('lat'),
+            'lng': state.get('lng'),
+            'saved_at': state.get('saved_at'),
+            'candidate_block': state.get('candidate_block'),
+            'candidate_sides': state.get('candidate_sides', []),
+            'time_limit': state.get('time_limit'),
+        }
+
+    def _status_parked(self, state: Dict) -> Dict:
         result = {
+            'status': 'parked',
             'parked': True,
-            'location': location,
+            'location': state['location'],
             'saved_at': state.get('saved_at'),
             'schedules': state.get('schedules', []),
             'next_sweeping': None,
             'time_limit': state.get('time_limit'),
             'lat': state.get('lat'),
             'lng': state.get('lng'),
-            'urgency': 'safe',  # safe | soon | urgent | now
+            'urgency': 'safe',
         }
 
+        next_sweep = self.get_next_sweeping(state)
         if next_sweep:
-            now = datetime.now()
-            start = next_sweep['start_time']
-            end = next_sweep['end_time']
-            delta = start - now
+            result['next_sweeping'], result['urgency'] = self._format_next_sweep(
+                next_sweep
+            )
+        return result
 
-            # Format time
-            from_h = next_sweep['schedule'].fromhour
-            to_h = next_sweep['schedule'].tohour
-            from_str = f"{from_h % 12 or 12}{'am' if from_h < 12 else 'pm'}"
-            to_str = f"{to_h % 12 or 12}{'am' if to_h < 12 else 'pm'}"
+    @staticmethod
+    def _format_next_sweep(next_sweep: Dict) -> Tuple[Dict, str]:
+        now = now_local()
+        start = next_sweep['start_time']
+        end = next_sweep['end_time']
+        delta = start - now
 
-            total_seconds = int(delta.total_seconds())
-            if total_seconds < 0:
-                when_label = "NOW"
-                urgency = 'now'
-            elif delta.days == 0 and total_seconds < 7200:  # < 2 hours
-                hours = total_seconds // 3600
-                mins = (total_seconds % 3600) // 60
-                when_label = f"in {hours}h {mins}m" if hours else f"in {mins} min"
-                urgency = 'urgent'
-            elif delta.days == 0:
-                urgency = 'soon'
-                when_label = f"today {from_str}–{to_str}"
-            elif delta.days == 1:
-                urgency = 'soon'
-                when_label = f"tomorrow {from_str}–{to_str}"
-            else:
-                urgency = 'safe'
-                day_str = start.strftime('%A, %b ') + ordinal(start.day)
-                when_label = f"{day_str} {from_str}–{to_str}"
+        sched = next_sweep['schedule']
+        from_str = f"{sched.fromhour % 12 or 12}{'am' if sched.fromhour < 12 else 'pm'}"
+        to_str = f"{sched.tohour % 12 or 12}{'am' if sched.tohour < 12 else 'pm'}"
 
-            result['next_sweeping'] = {
+        total_seconds = int(delta.total_seconds())
+        if total_seconds < 0:
+            when_label, urgency = "NOW", 'now'
+        elif delta.days == 0 and total_seconds < 7200:  # < 2h
+            hours = total_seconds // 3600
+            mins = (total_seconds % 3600) // 60
+            when_label = f"in {hours}h {mins}m" if hours else f"in {mins} min"
+            urgency = 'urgent'
+        elif delta.days == 0:
+            when_label = f"today {from_str}–{to_str}"
+            urgency = 'soon'
+        elif delta.days == 1:
+            when_label = f"tomorrow {from_str}–{to_str}"
+            urgency = 'soon'
+        else:
+            day_str = start.strftime('%A, %b ') + ordinal(start.day)
+            when_label = f"{day_str} {from_str}–{to_str}"
+            urgency = 'safe'
+
+        return (
+            {
                 'when_label': when_label,
                 'start_iso': start.isoformat(),
                 'end_iso': end.isoformat(),
-                'weekday': next_sweep['schedule'].weekday,
-                'side': next_sweep['schedule'].blockside,
-            }
-            result['urgency'] = urgency
-
-        return result
+                'weekday': sched.weekday,
+                'side': sched.blockside,
+            },
+            urgency,
+        )
