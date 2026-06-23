@@ -1,8 +1,8 @@
 # Append to /config/configuration.yaml on the HA host to register the
-# Parking dashboard alongside the default storage-mode dashboard.
+# YAML-mode dashboards alongside the default storage-mode dashboard.
 #
-# Note: HA requires the dashboard URL path (the key under `dashboards:`)
-# to contain a hyphen, hence "car-parker" rather than "parking".
+# Note: HA requires each dashboard URL path (the key under `dashboards:`)
+# to contain a hyphen, hence "car-parker" / "squawkers-mccaw".
 
 lovelace:
   mode: storage
@@ -12,5 +12,12 @@ lovelace:
       title: Parking
       icon: mdi:car
       filename: dashboards/parking.yaml
+      show_in_sidebar: true
+      require_admin: false
+    squawkers-mccaw:
+      mode: yaml
+      title: Squawkers
+      icon: mdi:bird
+      filename: dashboards/squawkers.yaml
       show_in_sidebar: true
       require_admin: false

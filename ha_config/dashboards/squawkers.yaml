@@ -1,0 +1,531 @@
+# Squawkers McCaw dashboard — sends learned IR commands via the office
+# Broadlink emitter (remote.office_lights, device "squawkers").
+#
+# Pure built-in cards: no HACS dependency.
+#
+# Deployed at /config/dashboards/squawkers.yaml on the HA host.
+# Registered in /config/configuration.yaml under lovelace.dashboards.squawkers-mccaw.
+
+title: Squawkers
+
+views:
+  - title: Squawkers
+    path: squawkers
+    icon: mdi:bird
+    type: sections
+    max_columns: 2
+    sections:
+      - type: grid
+        cards:
+          - type: markdown
+            content: |
+              # 🦜 Squawkers McCaw
+
+              32 learned IR commands. Each press repeats the signal 3× for
+              reliability. Start with **DANCE** / **RESET** if unsure.
+      - type: grid
+        cards:
+          - type: markdown
+            content: |
+              ### 🦜 Universal
+
+              The most reliable commands — work in any mode.
+      - type: grid
+        columns: 3
+        square: false
+        cards:
+          - type: button
+            name: DANCE
+            icon: mdi:dance-ballroom
+            tap_action:
+              action: call-service
+              service: remote.send_command
+              target:
+                entity_id: remote.office_lights
+              data:
+                device: squawkers
+                command: DANCE
+                num_repeats: 3
+                delay_secs: 0.5
+          - type: button
+            name: RESET
+            icon: mdi:stop-circle-outline
+            tap_action:
+              action: call-service
+              service: remote.send_command
+              target:
+                entity_id: remote.office_lights
+              data:
+                device: squawkers
+                command: RESET
+                num_repeats: 3
+                delay_secs: 0.5
+      - type: grid
+        cards:
+          - type: markdown
+            content: |
+              ### 🔘 Buttons (A–F)
+
+              Plain button presses.
+      - type: grid
+        columns: 3
+        square: false
+        cards:
+          - type: button
+            name: Button A
+            icon: mdi:alpha-a-box
+            tap_action:
+              action: call-service
+              service: remote.send_command
+              target:
+                entity_id: remote.office_lights
+              data:
+                device: squawkers
+                command: Button A
+                num_repeats: 3
+                delay_secs: 0.5
+          - type: button
+            name: Button B
+            icon: mdi:alpha-b-box
+            tap_action:
+              action: call-service
+              service: remote.send_command
+              target:
+                entity_id: remote.office_lights
+              data:
+                device: squawkers
+                command: Button B
+                num_repeats: 3
+                delay_secs: 0.5
+          - type: button
+            name: Button C
+            icon: mdi:alpha-c-box
+            tap_action:
+              action: call-service
+              service: remote.send_command
+              target:
+                entity_id: remote.office_lights
+              data:
+                device: squawkers
+                command: Button C
+                num_repeats: 3
+                delay_secs: 0.5
+          - type: button
+            name: Button D
+            icon: mdi:alpha-d-box
+            tap_action:
+              action: call-service
+              service: remote.send_command
+              target:
+                entity_id: remote.office_lights
+              data:
+                device: squawkers
+                command: Button D
+                num_repeats: 3
+                delay_secs: 0.5
+          - type: button
+            name: Button E
+            icon: mdi:alpha-e-box
+            tap_action:
+              action: call-service
+              service: remote.send_command
+              target:
+                entity_id: remote.office_lights
+              data:
+                device: squawkers
+                command: Button E
+                num_repeats: 3
+                delay_secs: 0.5
+          - type: button
+            name: Button F
+            icon: mdi:alpha-f-box
+            tap_action:
+              action: call-service
+              service: remote.send_command
+              target:
+                entity_id: remote.office_lights
+              data:
+                device: squawkers
+                command: Button F
+                num_repeats: 3
+                delay_secs: 0.5
+      - type: grid
+        cards:
+          - type: markdown
+            content: |
+              ### 🎙️ Commands (A–F)
+
+              Command mode — triggers custom programmed voice commands.
+      - type: grid
+        columns: 3
+        square: false
+        cards:
+          - type: button
+            name: Command A
+            icon: mdi:alpha-a-circle
+            tap_action:
+              action: call-service
+              service: remote.send_command
+              target:
+                entity_id: remote.office_lights
+              data:
+                device: squawkers
+                command: Command A
+                num_repeats: 3
+                delay_secs: 0.5
+          - type: button
+            name: Command B
+            icon: mdi:alpha-b-circle
+            tap_action:
+              action: call-service
+              service: remote.send_command
+              target:
+                entity_id: remote.office_lights
+              data:
+                device: squawkers
+                command: Command B
+                num_repeats: 3
+                delay_secs: 0.5
+          - type: button
+            name: Command C
+            icon: mdi:alpha-c-circle
+            tap_action:
+              action: call-service
+              service: remote.send_command
+              target:
+                entity_id: remote.office_lights
+              data:
+                device: squawkers
+                command: Command C
+                num_repeats: 3
+                delay_secs: 0.5
+          - type: button
+            name: Command D
+            icon: mdi:alpha-d-circle
+            tap_action:
+              action: call-service
+              service: remote.send_command
+              target:
+                entity_id: remote.office_lights
+              data:
+                device: squawkers
+                command: Command D
+                num_repeats: 3
+                delay_secs: 0.5
+          - type: button
+            name: Command E
+            icon: mdi:alpha-e-circle
+            tap_action:
+              action: call-service
+              service: remote.send_command
+              target:
+                entity_id: remote.office_lights
+              data:
+                device: squawkers
+                command: Command E
+                num_repeats: 3
+                delay_secs: 0.5
+          - type: button
+            name: Command F
+            icon: mdi:alpha-f-circle
+            tap_action:
+              action: call-service
+              service: remote.send_command
+              target:
+                entity_id: remote.office_lights
+              data:
+                device: squawkers
+                command: Command F
+                num_repeats: 3
+                delay_secs: 0.5
+      - type: grid
+        cards:
+          - type: markdown
+            content: |
+              ### 😜 Gags (A–F)
+
+              Gags mode — comedic bits.
+      - type: grid
+        columns: 3
+        square: false
+        cards:
+          - type: button
+            name: Gag A
+            icon: mdi:emoticon-tongue
+            tap_action:
+              action: call-service
+              service: remote.send_command
+              target:
+                entity_id: remote.office_lights
+              data:
+                device: squawkers
+                command: Gags A
+                num_repeats: 3
+                delay_secs: 0.5
+          - type: button
+            name: Gag B
+            icon: mdi:emoticon-tongue
+            tap_action:
+              action: call-service
+              service: remote.send_command
+              target:
+                entity_id: remote.office_lights
+              data:
+                device: squawkers
+                command: Gags B
+                num_repeats: 3
+                delay_secs: 0.5
+          - type: button
+            name: Gag C
+            icon: mdi:emoticon-tongue
+            tap_action:
+              action: call-service
+              service: remote.send_command
+              target:
+                entity_id: remote.office_lights
+              data:
+                device: squawkers
+                command: Gags C
+                num_repeats: 3
+                delay_secs: 0.5
+          - type: button
+            name: Gag D
+            icon: mdi:emoticon-tongue
+            tap_action:
+              action: call-service
+              service: remote.send_command
+              target:
+                entity_id: remote.office_lights
+              data:
+                device: squawkers
+                command: Gags D
+                num_repeats: 3
+                delay_secs: 0.5
+          - type: button
+            name: Gag E
+            icon: mdi:emoticon-tongue
+            tap_action:
+              action: call-service
+              service: remote.send_command
+              target:
+                entity_id: remote.office_lights
+              data:
+                device: squawkers
+                command: Gags E
+                num_repeats: 3
+                delay_secs: 0.5
+          - type: button
+            name: Gag F
+            icon: mdi:emoticon-tongue
+            tap_action:
+              action: call-service
+              service: remote.send_command
+              target:
+                entity_id: remote.office_lights
+              data:
+                device: squawkers
+                command: Gags F
+                num_repeats: 3
+                delay_secs: 0.5
+      - type: grid
+        cards:
+          - type: markdown
+            content: |
+              ### ⏺️ Record Command (A–F)
+
+              Programming mode — puts the parrot into RECORD. Use deliberately.
+      - type: grid
+        columns: 3
+        square: false
+        cards:
+          - type: button
+            name: Rec Cmd A
+            icon: mdi:record-rec
+            tap_action:
+              action: call-service
+              service: remote.send_command
+              target:
+                entity_id: remote.office_lights
+              data:
+                device: squawkers
+                command: Record Command A
+                num_repeats: 3
+                delay_secs: 0.5
+              confirmation:
+                text: Put Squawkers into RECORD mode (Rec Cmd A)?
+          - type: button
+            name: Rec Cmd B
+            icon: mdi:record-rec
+            tap_action:
+              action: call-service
+              service: remote.send_command
+              target:
+                entity_id: remote.office_lights
+              data:
+                device: squawkers
+                command: Record Command B
+                num_repeats: 3
+                delay_secs: 0.5
+              confirmation:
+                text: Put Squawkers into RECORD mode (Rec Cmd B)?
+          - type: button
+            name: Rec Cmd C
+            icon: mdi:record-rec
+            tap_action:
+              action: call-service
+              service: remote.send_command
+              target:
+                entity_id: remote.office_lights
+              data:
+                device: squawkers
+                command: Record Command C
+                num_repeats: 3
+                delay_secs: 0.5
+              confirmation:
+                text: Put Squawkers into RECORD mode (Rec Cmd C)?
+          - type: button
+            name: Rec Cmd D
+            icon: mdi:record-rec
+            tap_action:
+              action: call-service
+              service: remote.send_command
+              target:
+                entity_id: remote.office_lights
+              data:
+                device: squawkers
+                command: Record Command D
+                num_repeats: 3
+                delay_secs: 0.5
+              confirmation:
+                text: Put Squawkers into RECORD mode (Rec Cmd D)?
+          - type: button
+            name: Rec Cmd E
+            icon: mdi:record-rec
+            tap_action:
+              action: call-service
+              service: remote.send_command
+              target:
+                entity_id: remote.office_lights
+              data:
+                device: squawkers
+                command: Record Command E
+                num_repeats: 3
+                delay_secs: 0.5
+              confirmation:
+                text: Put Squawkers into RECORD mode (Rec Cmd E)?
+          - type: button
+            name: Rec Cmd F
+            icon: mdi:record-rec
+            tap_action:
+              action: call-service
+              service: remote.send_command
+              target:
+                entity_id: remote.office_lights
+              data:
+                device: squawkers
+                command: Record Command F
+                num_repeats: 3
+                delay_secs: 0.5
+              confirmation:
+                text: Put Squawkers into RECORD mode (Rec Cmd F)?
+      - type: grid
+        cards:
+          - type: markdown
+            content: |
+              ### ⏺️ Record Response (A–F)
+
+              Programming mode — records a response to a custom command.
+      - type: grid
+        columns: 3
+        square: false
+        cards:
+          - type: button
+            name: Rec Resp A
+            icon: mdi:record-rec
+            tap_action:
+              action: call-service
+              service: remote.send_command
+              target:
+                entity_id: remote.office_lights
+              data:
+                device: squawkers
+                command: Record Response A
+                num_repeats: 3
+                delay_secs: 0.5
+              confirmation:
+                text: Put Squawkers into RECORD mode (Rec Resp A)?
+          - type: button
+            name: Rec Resp B
+            icon: mdi:record-rec
+            tap_action:
+              action: call-service
+              service: remote.send_command
+              target:
+                entity_id: remote.office_lights
+              data:
+                device: squawkers
+                command: Record Response B
+                num_repeats: 3
+                delay_secs: 0.5
+              confirmation:
+                text: Put Squawkers into RECORD mode (Rec Resp B)?
+          - type: button
+            name: Rec Resp C
+            icon: mdi:record-rec
+            tap_action:
+              action: call-service
+              service: remote.send_command
+              target:
+                entity_id: remote.office_lights
+              data:
+                device: squawkers
+                command: Record Response C
+                num_repeats: 3
+                delay_secs: 0.5
+              confirmation:
+                text: Put Squawkers into RECORD mode (Rec Resp C)?
+          - type: button
+            name: Rec Resp D
+            icon: mdi:record-rec
+            tap_action:
+              action: call-service
+              service: remote.send_command
+              target:
+                entity_id: remote.office_lights
+              data:
+                device: squawkers
+                command: Record Response D
+                num_repeats: 3
+                delay_secs: 0.5
+              confirmation:
+                text: Put Squawkers into RECORD mode (Rec Resp D)?
+          - type: button
+            name: Rec Resp E
+            icon: mdi:record-rec
+            tap_action:
+              action: call-service
+              service: remote.send_command
+              target:
+                entity_id: remote.office_lights
+              data:
+                device: squawkers
+                command: Record Response E
+                num_repeats: 3
+                delay_secs: 0.5
+              confirmation:
+                text: Put Squawkers into RECORD mode (Rec Resp E)?
+          - type: button
+            name: Rec Resp F
+            icon: mdi:record-rec
+            tap_action:
+              action: call-service
+              service: remote.send_command
+              target:
+                entity_id: remote.office_lights
+              data:
+                device: squawkers
+                command: Record Response F
+                num_repeats: 3
+                delay_secs: 0.5
+              confirmation:
+                text: Put Squawkers into RECORD mode (Rec Resp F)?
